@@ -10,6 +10,7 @@ export const SilverTableSchema = z.enum([
   "territory",
   "call",
   "user",
+  "account_xref",
 ]);
 export type SilverTable = z.infer<typeof SilverTableSchema>;
 

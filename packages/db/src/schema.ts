@@ -30,6 +30,7 @@ export const silverTableEnum = pgEnum("silver_table", [
   "territory",
   "call",
   "user",
+  "account_xref",
 ]);
 
 export const mappingKindEnum = pgEnum("mapping_kind", [

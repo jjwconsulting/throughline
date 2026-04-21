@@ -8,6 +8,13 @@
       "when": 1776769585263,
       "tag": "0000_broken_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776800081631,
+      "tag": "0001_optimal_hairball",
+      "breakpoints": true
     }
   ]
 }
