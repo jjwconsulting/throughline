@@ -62,8 +62,18 @@ bronze_<tenant_slug>/  Per-tenant raw landing. Shape matches the source (Veeva V
 silver/                Shared. Cleaned, typed, deduped business entities. tenant_id on every table.
 gold/                  Shared. Dimensional model. dim_*, fact_*, bridge_*. Feeds semantic model.
 config/                Shared. Tenant registry, mapping tables, per-tenant integration config,
-                       field-mapping tables.
+                       field-mapping tables. Mirrors Postgres via the sync notebook.
+ops/                   Shared. Fabric-native operational tables (ingest logs, job runs, data
+                       quality checks). Not mirrored from Postgres — read-write from notebooks.
 ```
+
+### Delta only
+
+Every managed table in the lakehouse is a **Delta** table. No plain Parquet, no CSV-backed tables, no external references. Every `CREATE TABLE` includes `USING DELTA`; every `DataFrame.write` uses `.format("delta")`. Rationale:
+
+- Single storage format means one mental model for ACID, time travel, schema evolution, and MERGE semantics.
+- Fabric's SQL endpoint, Direct Lake semantic models, and shortcuts all assume Delta — mixing formats creates sharp edges later.
+- Bronze inherits this too. If a raw file is CSV/Excel, we *read* it with `spark.read.csv(...)` and *write* the result as Delta. The raw file stays in `Files/` as reference; the table in `Tables/` is always Delta.
 
 ### Bronze layout (per-tenant)
 

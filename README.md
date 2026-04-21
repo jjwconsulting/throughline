@@ -48,6 +48,8 @@ Requires Node 20+ and pnpm 9+.
 - Fabric SKU sizing (depends on first-customer data volume + embed concurrency)
 - Mapping-table UI framework (TanStack Table + React Hook Form + Zod is the likely stack)
 - CI provider (GitHub Actions assumed)
+- Goals structure — form-entry vs file-upload vs both; table shape; post-MVP. See [docs/product/goals.md](docs/product/goals.md)
+- SFTP hosting for prod — dev uses lakehouse `Files/` as drop zone; prod TBD (VM with OpenSSH + BlobFuse vs Azure Storage SFTP)
 
 ## What not to repeat from fennec
 

@@ -10,3 +10,4 @@ dist
 .fabric-secrets
 coverage
 *.tsbuildinfo
+test-data/
