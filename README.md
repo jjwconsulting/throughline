@@ -16,17 +16,12 @@ throughline/
 │   └── web/                  Next.js 16 app (marketing + auth'd app shell + Power BI embed)
 ├── packages/
 │   └── shared/               TS types + Zod schemas shared across apps
-├── data/
-│   ├── fabric/
-│   │   ├── notebooks/        PySpark notebooks (ingest, transforms)
-│   │   └── pipelines/        Fabric pipeline JSON definitions
-│   ├── semantic/             Power BI semantic models (.tmdl)
-│   └── accelerators/         Source connectors
-│       ├── veeva/            Veeva Vault Direct Data (hardened from fennec)
-│       ├── sftp/             SFTP drop ingest
-│       ├── email/            Email attachment ingest
-│       └── hubspot/          (future)
-└── infra/                    Bicep/Terraform for Azure + Fabric
+├── data/                     Fabric-owned. Git integration syncs notebooks, pipelines,
+│                             and semantic models into this folder.
+├── infra/                    Bicep/Terraform for Azure + Fabric
+├── ARCHITECTURE.md           Multi-tenancy, Lakehouse, RLS, ingestion, capacity decisions
+├── README.md                 This file
+└── CLAUDE.md                 Context for future Claude sessions
 ```
 
 ## Getting started
@@ -56,4 +51,4 @@ Requires Node 20+ and pnpm 9+.
 
 ## What not to repeat from fennec
 
-Tracked in `CLAUDE.md`. TL;DR: no hardcoded workspace/lakehouse/territory IDs, no single-tenant shortcuts, enable incremental ingest from day one, add CI/CD, write tests.
+Tracked in `ARCHITECTURE.md` §9. TL;DR: no hardcoded IDs, incremental-first ingest, retry on every pipeline activity, bridge tables instead of semicolon-delimited strings, tests before merge.

@@ -1,1 +1,0 @@
-# Power BI semantic models (.tmdl). One shared model per product tier; RLS via EffectiveIdentity on tenant_id + user principal.

@@ -1,1 +1,0 @@
-# Email attachment ingest. Logic Apps or Graph API pulls CSV/text attachments from a tenant-specific inbox.
