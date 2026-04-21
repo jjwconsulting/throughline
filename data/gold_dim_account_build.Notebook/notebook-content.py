@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   channel            STRING,
   city               STRING,
   state              STRING,
-  source_key_count   INT       NOT NULL,
+  source_key_count   BIGINT    NOT NULL,
   gold_built_at      TIMESTAMP NOT NULL
 ) USING DELTA
 """)
@@ -101,6 +101,7 @@ row_count = result_df.count()
     result_df.write
     .format("delta")
     .mode("overwrite")
+    .option("overwriteSchema", "true")
     .saveAsTable(GOLD_TABLE)
 )
 
