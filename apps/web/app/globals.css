@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #FAFAF7;
+  --color-surface: #FFFFFF;
+  --color-surface-alt: #F3F2EE;
+  --color-ink: #1C1B19;
+  --color-ink-muted: #5A564E;
+  --color-primary: #1F4E46;
+  --color-primary-hover: #173A33;
+  --color-accent: #C89B4A;
+  --color-positive: #3D8B5E;
+  --color-negative: #B24545;
+  --color-border: #E5E3DB;
+
+  --font-display: "DM Serif Display", Georgia, serif;
+  --font-body: "DM Sans", system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}

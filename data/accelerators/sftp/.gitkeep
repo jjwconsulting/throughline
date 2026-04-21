@@ -1,0 +1,1 @@
+# SFTP drop ingest. Tenant SFTP accounts land files in a blob container; notebook detects and loads.

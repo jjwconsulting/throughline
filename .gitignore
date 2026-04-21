@@ -1,0 +1,11 @@
+node_modules
+.next
+.turbo
+dist
+.env
+.env.local
+.DS_Store
+*.log
+.vercel
+.fabric-secrets
+coverage
