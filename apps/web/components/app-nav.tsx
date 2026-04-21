@@ -1,3 +1,4 @@
+import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 
 const links = [
@@ -15,17 +16,20 @@ export default function AppNav() {
         <Link href="/" className="font-display text-xl">
           Throughline
         </Link>
-        <nav className="flex gap-6 text-sm">
-          {links.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-            >
-              {l.label}
-            </Link>
-          ))}
-        </nav>
+        <div className="flex items-center gap-6">
+          <nav className="flex gap-6 text-sm">
+            {links.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className="text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <UserButton afterSignOutUrl="/" />
+        </div>
       </div>
     </header>
   );
