@@ -204,36 +204,67 @@ Tenant-specific custom fields that don't fit the standard silver schema either d
 
 ## 5. Semantic model & RLS
 
-One Power BI semantic model (`.tmdl`) committed under `data/` via Fabric Git integration. Sits on `gold.*` tables.
+One Power BI semantic model committed under `data/` via Fabric Git integration. Sits on `gold.*` tables.
 
-### RLS pattern
+### Current choice: Import mode, shared model, customData-based RLS
 
-Two roles:
+**Storage mode: Import** (not Direct Lake). Reason below.
 
-1. **DefaultUser** — dynamic filter:
-   ```
-   [Email] = USERPRINCIPALNAME()
-   ```
-   applied on `dim_user`. Relationships propagate: `dim_user` → `dim_territory` → all facts filter to the user's effective territories. `tenant_id` gets filtered transitively because `dim_user.tenant_id` → facts' `tenant_id`.
+**RLS pattern:**
 
-2. **BypassTenant** — no filter. Granted only to JJW/Sentero operator admins for support. Usage logged.
-
-### Embed token generation
-
-Web app backend generates tokens using service principal (`POWERBI_CLIENT_ID` + `POWERBI_CLIENT_SECRET`):
+The web app resolves the signed-in user's `tenant_id` from Postgres `tenant_user` *before* minting the embed token, and passes the UUID as `customData` in the V2 GenerateToken identity. A single DAX role filters every fact/dim:
 
 ```
-generateTokenInGroup(workspaceId, {
-  accessLevel: "View",
+[tenant_id] = CUSTOMDATA()
+```
+
+Embed token shape (actual code in `apps/web/lib/powerbi.ts`):
+
+```
+POST /v1.0/myorg/GenerateToken
+{
+  datasets: [{ id: datasetId, xmlaPermissions: "ReadOnly" }],
+  reports: [{ id: reportId }],
+  targetWorkspaces: [{ id: workspaceId }],
   identities: [{
-    username: user.email,
+    username: "throughline-embed",
     roles: ["DefaultUser"],
     datasets: [datasetId],
-  }],
-})
+    customData: "<tenant_id uuid>"
+  }]
+}
 ```
 
-RLS then does the rest. Do **not** pass `tenant_id` in identity — it's derived via the model.
+**Why `customData` and not `USERPRINCIPALNAME()`:** effective identity against the lakehouse datasource isn't resolvable the way it is for DirectQuery sources — Direct Lake reads Delta files, there's no per-user query execution. `customData` is Microsoft's supported escape hatch: arbitrary context passed through the embed token into DAX via `CUSTOMDATA()`. Sidesteps the whole SSO/effective-identity question.
+
+### Why Import mode (and when to reconsider)
+
+Direct Lake is the architecturally preferred mode — reads Delta live, no refresh jobs, matches our lakehouse storage. But as of 2026-Q2, Fabric's V2 GenerateToken endpoint **rejects any embed token with a populated `identities` array for Direct Lake datasets**, with error: `"Creating embed token with effective identity is not supported for this datasource"`. This breaks RLS for service-principal embed — the only auth pattern available for app-owns-data.
+
+Import mode doesn't have this limitation. RLS via `customData` works out of the box. Refresh cost on our config+dim data volumes is trivial; daily refresh is fine.
+
+**Revisit Direct Lake when:**
+- Microsoft lifts the restriction (monitor Fabric release notes)
+- Our gold volumes start pushing Import mode memory limits (unlikely for years at typical pharma-commercial scale; life-sciences facts are usually wide but not deep)
+- We hit refresh-latency pain (e.g., near-real-time dashboards required)
+
+### Fallback if Direct Lake + RLS stays broken and we need it
+
+**Per-tenant semantic models, shared workspace.** One semantic model per tenant, each with a hardcoded DAX role `[tenant_id] = "<that-tenant-uuid>"` and the service principal assigned to that role. Direct Lake works because the filter is baked in — no `identities` array passed at embed time.
+
+Tradeoff: N semantic models to manage. Requires TMDL-as-code + a deploy pipeline for scale. Our silver/gold storage doesn't change; only the PBI presentation layer. Migration cost is bounded.
+
+Decision tree:
+
+```
+Direct Lake + RLS becomes SP-friendly   →  collapse to A-Direct Lake (one model, live data)
+Import-mode refresh becomes painful     →  move to per-tenant Direct Lake models (pattern B)
+Neither happens                         →  stay on A-Import indefinitely (fine for many tenants)
+```
+
+### BypassTenant role
+
+Operator admins (JJW/Sentero support) need a "see any tenant" view. Implement as a second DAX role with no filter, assigned to specific admin emails via the embed token's `roles` array. Not wired yet — added when first support ticket requires cross-tenant view.
 
 ---
 

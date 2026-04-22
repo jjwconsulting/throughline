@@ -1,0 +1,89 @@
+table 'gold dim_account'
+	lineageTag: 3d312202-8501-4ab0-bed4-ca2366ffcd48
+
+	column tenant_id
+		dataType: string
+		lineageTag: 2b219d68-d88b-418c-bf52-58aeecf1c53c
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_key
+		dataType: string
+		lineageTag: 2c4c2893-c887-42b5-8d02-9c1e1ad1e1c2
+		summarizeBy: none
+		sourceColumn: account_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_account_id
+		dataType: string
+		lineageTag: ab8b3de2-c089-418f-b6c8-08a102558e2d
+		summarizeBy: none
+		sourceColumn: veeva_account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column name
+		dataType: string
+		lineageTag: 97e875a7-98a3-4262-9a65-1057a4cf8ef6
+		summarizeBy: none
+		sourceColumn: name
+
+		annotation SummarizationSetBy = Automatic
+
+	column channel
+		dataType: string
+		lineageTag: b74c48d3-8f11-4779-8798-00a8f67a5f67
+		summarizeBy: none
+		sourceColumn: channel
+
+		annotation SummarizationSetBy = Automatic
+
+	column city
+		dataType: string
+		lineageTag: da668c5f-e7d3-442f-a364-c9b8b81e5b51
+		summarizeBy: none
+		sourceColumn: city
+
+		annotation SummarizationSetBy = Automatic
+
+	column state
+		dataType: string
+		lineageTag: b5f9b0b2-1212-4165-be4e-ba094ab4aaaf
+		summarizeBy: none
+		sourceColumn: state
+
+		annotation SummarizationSetBy = Automatic
+
+	column source_key_count
+		dataType: int64
+		formatString: 0
+		lineageTag: 5bcaecf6-15e1-404a-a3c0-b68190a8deb7
+		summarizeBy: sum
+		sourceColumn: source_key_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column gold_built_at
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 48f6e599-7416-48c3-a313-d67ac62fcfc8
+		summarizeBy: none
+		sourceColumn: gold_built_at
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'gold dim_account' = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Databases("w7lg7oteeoyepe3ksmlsiq4v6i-uk72biu5bwdupbe2wcrbkskyoy.datawarehouse.fabric.microsoft.com"),
+				    throughline_lakehouse = Source{[Name="throughline_lakehouse"]}[Data],
+				    gold_dim_account = throughline_lakehouse{[Schema="gold",Item="dim_account"]}[Data]
+				in
+				    gold_dim_account
+
+	annotation PBI_ResultType = Table
+
