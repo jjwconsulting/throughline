@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "sftp_ingest"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "c0f856ac-b886-9c46-49b0-b617acc8e3c2"
+  }
+}

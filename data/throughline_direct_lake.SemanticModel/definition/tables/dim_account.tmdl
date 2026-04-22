@@ -1,0 +1,94 @@
+table dim_account
+	lineageTag: 955c05e9-4fe7-4b9b-9662-13f313e9ba56
+	sourceLineageTag: [gold].[dim_account]
+
+	column tenant_id
+		dataType: string
+		lineageTag: 2aa35be0-f4bd-4695-8c69-3d4ebf8a9579
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_key
+		dataType: string
+		lineageTag: ebbe8534-fca4-4829-83b6-c06c907257ac
+		sourceLineageTag: account_key
+		summarizeBy: none
+		sourceColumn: account_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_account_id
+		dataType: string
+		lineageTag: 198bb227-012a-48b5-acd1-880c7ea7c7a3
+		sourceLineageTag: veeva_account_id
+		summarizeBy: none
+		sourceColumn: veeva_account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column name
+		dataType: string
+		lineageTag: dfa8961c-07f4-4a78-9be2-e3341f6a7d93
+		sourceLineageTag: name
+		summarizeBy: none
+		sourceColumn: name
+
+		annotation SummarizationSetBy = Automatic
+
+	column channel
+		dataType: string
+		lineageTag: 12f67a45-3a20-4309-873b-b635271b9c44
+		sourceLineageTag: channel
+		summarizeBy: none
+		sourceColumn: channel
+
+		annotation SummarizationSetBy = Automatic
+
+	column city
+		dataType: string
+		lineageTag: a71488ff-69e6-4d30-80ab-2301b776ec99
+		sourceLineageTag: city
+		summarizeBy: none
+		sourceColumn: city
+
+		annotation SummarizationSetBy = Automatic
+
+	column state
+		dataType: string
+		lineageTag: ea9db946-b340-40c6-898b-6e4832b5e9eb
+		sourceLineageTag: state
+		summarizeBy: none
+		sourceColumn: state
+
+		annotation SummarizationSetBy = Automatic
+
+	column source_key_count
+		dataType: int64
+		formatString: 0
+		lineageTag: 9e28a439-5f32-4dc3-bcaa-3f184d738f21
+		sourceLineageTag: source_key_count
+		summarizeBy: sum
+		sourceColumn: source_key_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column gold_built_at
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 85124834-88a9-4d9f-984b-b65b1931bee5
+		sourceLineageTag: gold_built_at
+		summarizeBy: none
+		sourceColumn: gold_built_at
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_account = entity
+		mode: directLake
+		source
+			entityName: dim_account
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'
+

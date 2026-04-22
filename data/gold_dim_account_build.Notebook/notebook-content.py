@@ -23,16 +23,13 @@
 # MARKDOWN ********************
 
 # # Gold build: dim_account
-#
 # First gold table. Derived from silver.account_xref. Establishes the gold
 # pattern ahead of real Veeva data — once Vault data lands, this gets
 # replaced by a dim built from Veeva's account master with account_xref
 # becoming a bridge.
-#
 # Shape: one row per (tenant_id, veeva_account_id). Where multiple source
 # keys from silver resolve to the same Veeva account, attributes (name,
 # channel, city, state) are collapsed via first().
-#
 # v0 scope: enough to drive a Power BI semantic model + one basic report.
 # No facts, no measures beyond count. The validation target is embed + RLS,
 # not business analytics.

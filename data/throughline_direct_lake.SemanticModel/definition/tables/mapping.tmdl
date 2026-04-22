@@ -1,0 +1,104 @@
+table mapping
+	lineageTag: d191db47-2cdf-459e-80d5-774186bd24fd
+	sourceLineageTag: [config].[mapping]
+
+	column id
+		dataType: string
+		lineageTag: 15a4ba56-025b-4d88-8ea1-f0e709269546
+		sourceLineageTag: id
+		summarizeBy: none
+		sourceColumn: id
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: 381f2495-40f5-44fa-bb8d-12ac453b0d82
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column kind
+		dataType: string
+		lineageTag: b2e0136c-aefb-4ba5-99a2-9ccc14b8d90c
+		sourceLineageTag: kind
+		summarizeBy: none
+		sourceColumn: kind
+
+		annotation SummarizationSetBy = Automatic
+
+	column source_key
+		dataType: string
+		lineageTag: d1fd7c84-9704-4562-b34a-8a692b7cfea4
+		sourceLineageTag: source_key
+		summarizeBy: none
+		sourceColumn: source_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column target_value
+		dataType: string
+		lineageTag: bfe4c2ce-5c38-4ea2-8965-e4a320555d96
+		sourceLineageTag: target_value
+		summarizeBy: none
+		sourceColumn: target_value
+
+		annotation SummarizationSetBy = Automatic
+
+	column notes
+		dataType: string
+		lineageTag: b6e37b89-e5aa-480c-9ee2-bd892e881c8e
+		sourceLineageTag: notes
+		summarizeBy: none
+		sourceColumn: notes
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_from
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: f67683e1-dfde-43f2-87ec-50c8c03bcfc6
+		sourceLineageTag: effective_from
+		summarizeBy: none
+		sourceColumn: effective_from
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_to
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: eea0f0ff-4b51-4897-ab7e-a7f8e608b794
+		sourceLineageTag: effective_to
+		summarizeBy: none
+		sourceColumn: effective_to
+
+		annotation SummarizationSetBy = Automatic
+
+	column updated_by
+		dataType: string
+		lineageTag: e3910dde-6bbe-4901-9130-c621b26c05b2
+		sourceLineageTag: updated_by
+		summarizeBy: none
+		sourceColumn: updated_by
+
+		annotation SummarizationSetBy = Automatic
+
+	column updated_at
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 226bbc6d-1a44-45cf-99f7-777adfc990a7
+		sourceLineageTag: updated_at
+		summarizeBy: none
+		sourceColumn: updated_at
+
+		annotation SummarizationSetBy = Automatic
+
+	partition mapping = entity
+		mode: directLake
+		source
+			entityName: mapping
+			schemaName: config
+			expressionSource: 'DirectLake - throughline_lakehouse'
+

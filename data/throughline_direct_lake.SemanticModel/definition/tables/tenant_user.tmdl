@@ -1,0 +1,39 @@
+table tenant_user
+	lineageTag: 75e27b20-b02c-47e9-b24a-685d8805cd8f
+	sourceLineageTag: [config].[tenant_user]
+
+	column tenant_id
+		dataType: string
+		lineageTag: eb53cbf9-eb7e-4093-a21f-e88ebcc92f17
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column user_email
+		dataType: string
+		lineageTag: d349b189-0a1a-4703-a5b8-641f83bed062
+		sourceLineageTag: user_email
+		summarizeBy: none
+		sourceColumn: user_email
+
+		annotation SummarizationSetBy = Automatic
+
+	column updated_at
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 658fd98c-8265-4602-9129-0c1194035876
+		sourceLineageTag: updated_at
+		summarizeBy: none
+		sourceColumn: updated_at
+
+		annotation SummarizationSetBy = Automatic
+
+	partition tenant_user = entity
+		mode: directLake
+		source
+			entityName: tenant_user
+			schemaName: config
+			expressionSource: 'DirectLake - throughline_lakehouse'
+

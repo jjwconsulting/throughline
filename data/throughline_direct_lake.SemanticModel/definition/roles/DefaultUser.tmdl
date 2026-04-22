@@ -1,0 +1,7 @@
+role DefaultUser
+	modelPermission: read
+
+	tablePermission dim_account = [tenant_id] == "CUSTOMDATA()"
+
+	annotation PBI_Id = 9a39a5f3a19946eeba4fcd2e15ccc287
+

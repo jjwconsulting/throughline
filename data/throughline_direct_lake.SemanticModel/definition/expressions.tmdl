@@ -1,0 +1,11 @@
+expression 'DirectLake - throughline_lakehouse' =
+		let
+		    Source = AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/a2a0bfa2-0d9d-4787-849a-b0a215495876/aaab7cf8-9b09-435e-8259-d666601d7472", [HierarchicalNavigation=true])
+		in
+		    Source
+	lineageTag: 36c42f29-8ff1-44df-860f-89f996293519
+
+	annotation PBI_IncludeFutureArtifacts = False
+
+	annotation PBI_RemovedChildren = [{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[config].[tenant_source_field_map]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[config].[tenant_veeva]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[config].[tenant]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[config].[tenant_email_drop]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[config].[tenant_sftp]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[ops].[sftp_ingest_log]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[silver].[account_xref]"}},"objectType":"Table"},{"remoteItemId":{"analysisServicesObject":{"sourceName":null,"sourceLineageTag":"[bronze_acme_pharma].[sftp_account_mapping]"}},"objectType":"Table"}]
+
