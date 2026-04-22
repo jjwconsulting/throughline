@@ -520,14 +520,26 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
     with tarfile.open(archive_path, "r:gz") as tar:
         tar.extractall(extract_path)
 
-    # The archive contains a top-level directdata-<name>/ folder
-    inner_candidates = [
-        p for p in Path(extract_path).iterdir()
-        if p.is_dir() and p.name.lower().startswith("directdata-")
-    ]
-    if not inner_candidates:
-        raise RuntimeError(f"Expected a directdata-* folder in {extract_path}")
-    inner = inner_candidates[0]
+    # Locate the folder containing Object/Metadata/Picklist. Veeva archives
+    # vary: some wrap contents in `directdata-<name>/`, some put them at the
+    # root, some use a different wrapper name. Probe both layouts.
+    extract_dir = Path(extract_path)
+    expected_subfolders = ("Object", "Metadata", "Picklist")
+
+    if any((extract_dir / sf).exists() for sf in expected_subfolders):
+        inner = extract_dir
+    else:
+        subdirs = [p for p in extract_dir.iterdir() if p.is_dir()]
+        wrapped = [p for p in subdirs if any((p / sf).exists() for sf in expected_subfolders)]
+        if len(wrapped) == 1:
+            inner = wrapped[0]
+        else:
+            raise RuntimeError(
+                f"Couldn't locate Object/Metadata/Picklist under {extract_path}. "
+                f"Top-level entries: {[p.name for p in extract_dir.iterdir()]}. "
+                f"Wrapped candidates: {[p.name for p in wrapped]}"
+            )
+    print(f"[{slug}] extracted layout root: {inner}")
 
     # Process Object/, Metadata/, Picklist/
     tables_written = 0
