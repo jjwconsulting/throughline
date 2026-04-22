@@ -16,5 +16,7 @@ annotation PBI_ProTooling = ["DevMode"]
 
 ref table 'gold dim_account'
 
+ref role DefaultUser
+
 ref cultureInfo en-US
 

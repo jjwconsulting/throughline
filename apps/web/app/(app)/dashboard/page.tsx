@@ -31,6 +31,30 @@ export default async function Dashboard() {
 
   const tenantId = await tenantIdForUser(userEmail);
 
+  if (!tenantId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="font-display text-3xl">Dashboard</h1>
+        </div>
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center">
+          <p className="font-medium">No tenant access</p>
+          <p className="text-sm text-[var(--color-ink-muted)] mt-2 max-w-md mx-auto">
+            Your account
+            {userEmail ? (
+              <>
+                {" "}
+                (<span className="font-mono">{userEmail}</span>)
+              </>
+            ) : null}{" "}
+            isn&apos;t associated with a tenant yet. Contact your administrator
+            to get provisioned.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const embed = await getReportEmbedConfig(tenantId);
 
   return (
