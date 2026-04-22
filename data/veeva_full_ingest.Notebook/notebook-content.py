@@ -522,15 +522,25 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
 
     # Locate the folder containing Object/Metadata/Picklist. Veeva archives
     # vary: some wrap contents in `directdata-<name>/`, some put them at the
-    # root, some use a different wrapper name. Probe both layouts.
+    # root. Subfolders may also be lowercase. Be flexible.
     extract_dir = Path(extract_path)
-    expected_subfolders = ("Object", "Metadata", "Picklist")
 
-    if any((extract_dir / sf).exists() for sf in expected_subfolders):
+    def find_category_in(root: Path, name: str) -> Path | None:
+        for child in root.iterdir():
+            if child.is_dir() and child.name.lower() == name.lower():
+                return child
+        return None
+
+    def root_has_categories(root: Path) -> bool:
+        return any(
+            find_category_in(root, c) is not None
+            for c in ("Object", "Metadata", "Picklist")
+        )
+
+    if root_has_categories(extract_dir):
         inner = extract_dir
     else:
-        subdirs = [p for p in extract_dir.iterdir() if p.is_dir()]
-        wrapped = [p for p in subdirs if any((p / sf).exists() for sf in expected_subfolders)]
+        wrapped = [p for p in extract_dir.iterdir() if p.is_dir() and root_has_categories(p)]
         if len(wrapped) == 1:
             inner = wrapped[0]
         else:
@@ -541,17 +551,52 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
             )
     print(f"[{slug}] extracted layout root: {inner}")
 
-    # Process Object/, Metadata/, Picklist/
+    # Diagnostic: show what's inside (truncated)
+    def list_tree(d: Path, depth: int, prefix: str = ""):
+        if depth <= 0:
+            return
+        entries = sorted(d.iterdir(), key=lambda p: p.name)[:20]
+        for entry in entries:
+            marker = "/" if entry.is_dir() else ""
+            print(f"  {prefix}{entry.name}{marker}")
+            if entry.is_dir() and depth > 1:
+                list_tree(entry, depth - 1, prefix + "  ")
+
+    print(f"[{slug}] layout (depth 2):")
+    list_tree(inner, depth=2)
+
+    # Discover tables per category. Each table is either:
+    #   - a single .parquet file directly inside the category folder (flat), or
+    #   - a subfolder containing one or more .parquet files (nested)
+    def discover_tables(category_dir: Path | None) -> list[tuple[str, Path]]:
+        if category_dir is None or not category_dir.exists():
+            return []
+        out: list[tuple[str, Path]] = []
+        for entry in sorted(category_dir.iterdir(), key=lambda p: p.name):
+            if entry.is_dir():
+                has_parquet = any(
+                    child.suffix.lower() == ".parquet" and child.is_file()
+                    for child in entry.iterdir()
+                )
+                if has_parquet:
+                    out.append((entry.name, entry))
+            elif entry.suffix.lower() == ".parquet":
+                out.append((entry.stem, entry))
+        return out
+
+    # Process Object/, Metadata/, Picklist/ (case-insensitive)
     tables_written = 0
     rows_written = 0
-    for subfolder, prefix in [("Object", "veeva_obj"), ("Metadata", "veeva_meta"), ("Picklist", "veeva_pl")]:
-        sub = inner / subfolder
-        if not sub.exists():
+    for category, prefix in [("Object", "veeva_obj"), ("Metadata", "veeva_meta"), ("Picklist", "veeva_pl")]:
+        category_dir = find_category_in(inner, category)
+        tables = discover_tables(category_dir)
+        if not tables:
+            print(f"[{slug}]   no {category} tables found")
             continue
-        for parquet_file in sorted(sub.glob("*.parquet")):
-            stem = safe_table_stem(parquet_file.stem)
+        for table_stem, parquet_path in tables:
+            stem = safe_table_stem(table_stem)
             table_name = f"{schema_name}.{prefix}_{stem}"
-            relative = str(parquet_file.relative_to(FILES_ROOT)).replace("\\", "/")
+            relative = str(parquet_path.relative_to(FILES_ROOT)).replace("\\", "/")
 
             df = spark.read.parquet(f"Files/{relative}")
             df = (df
@@ -569,6 +614,27 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
             tables_written += 1
             rows_written += row_count
             print(f"[{slug}]   {table_name}  rows={row_count:,}")
+
+    if tables_written == 0:
+        # Don't poison the cursor — log as failed so re-runs retry.
+        log_ingest(
+            tenant_id, slug, vault_dns,
+            extract_type="full_directdata",
+            extract_name=latest.name,
+            extract_start_time=latest.start_time,
+            extract_stop_time=latest.stop_time,
+            record_count=latest.record_count,
+            fileparts=latest.fileparts,
+            total_size_bytes=latest.size,
+            download_started_at=download_started,
+            download_completed_at=download_completed,
+            status="failed",
+            error_message=(
+                f"Extract decompressed but no tables discovered. "
+                f"Inspect contents of {inner} to debug layout."
+            ),
+        )
+        return ("failed", 0, 0)
 
     # Cleanup
     if not KEEP_ARCHIVES:
