@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "veeva_full_ingest"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "eeced64c-7934-49f7-9026-31deb134b6ff"
+  }
+}
