@@ -566,23 +566,63 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
     list_tree(inner, depth=2)
 
     # Discover tables per category. Each table is either:
-    #   - a single .parquet file directly inside the category folder (flat), or
-    #   - a subfolder containing one or more .parquet files (nested)
+    #   - a single .csv or .parquet file inside the category (flat layout), or
+    #   - a subfolder of .csv or .parquet parts (nested layout)
+    # Veeva Direct Data ships CSV by default; we accept both for forward compat.
+    DATA_SUFFIXES = (".csv", ".parquet")
+
     def discover_tables(category_dir: Path | None) -> list[tuple[str, Path]]:
         if category_dir is None or not category_dir.exists():
             return []
         out: list[tuple[str, Path]] = []
         for entry in sorted(category_dir.iterdir(), key=lambda p: p.name):
             if entry.is_dir():
-                has_parquet = any(
-                    child.suffix.lower() == ".parquet" and child.is_file()
+                has_data = any(
+                    child.is_file() and child.suffix.lower() in DATA_SUFFIXES
                     for child in entry.iterdir()
                 )
-                if has_parquet:
+                if has_data:
                     out.append((entry.name, entry))
-            elif entry.suffix.lower() == ".parquet":
+            elif entry.suffix.lower() in DATA_SUFFIXES:
                 out.append((entry.stem, entry))
         return out
+
+    def read_data(path: Path):
+        """Read a CSV or Parquet file (or a folder of them) into a DataFrame.
+
+        Bronze keeps everything as STRING so silver can do its own typing.
+        CSV options handle multiline string fields (descriptions, notes) and
+        embedded quotes that show up in Veeva extracts.
+        """
+        if path.is_dir():
+            sample = next(
+                (f for f in path.iterdir()
+                 if f.is_file() and f.suffix.lower() in DATA_SUFFIXES),
+                None,
+            )
+            if sample is None:
+                raise RuntimeError(f"No data files in {path}")
+            suffix = sample.suffix.lower()
+        else:
+            suffix = path.suffix.lower()
+
+        relative = str(path.relative_to(FILES_ROOT)).replace("\\", "/")
+        spark_path = f"Files/{relative}"
+
+        if suffix == ".parquet":
+            return spark.read.parquet(spark_path)
+        if suffix == ".csv":
+            return (
+                spark.read
+                .option("header", "true")
+                .option("inferSchema", "false")
+                .option("multiLine", "true")
+                .option("escape", '"')
+                .option("quote", '"')
+                .option("nullValue", "")
+                .csv(spark_path)
+            )
+        raise RuntimeError(f"Unknown data extension {suffix} for {path}")
 
     # Process Object/, Metadata/, Picklist/ (case-insensitive)
     tables_written = 0
@@ -593,12 +633,11 @@ def ingest_tenant(tenant: dict) -> tuple[str, int, int]:
         if not tables:
             print(f"[{slug}]   no {category} tables found")
             continue
-        for table_stem, parquet_path in tables:
+        for table_stem, data_path in tables:
             stem = safe_table_stem(table_stem)
             table_name = f"{schema_name}.{prefix}_{stem}"
-            relative = str(parquet_path.relative_to(FILES_ROOT)).replace("\\", "/")
 
-            df = spark.read.parquet(f"Files/{relative}")
+            df = read_data(data_path)
             df = (df
                 .withColumn("_ingested_at", lit(RUN_AT).cast(TimestampType()))
                 .withColumn("_source_extract_name", lit(latest.name).cast(StringType()))
