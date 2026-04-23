@@ -17,6 +17,7 @@ ref table dim_account
 ref table tenant_user
 ref table dim_date
 ref table dim_hcp
+ref table dim_hco
 ref table dim_user
 ref table fact_call
 
@@ -25,6 +26,10 @@ ref role DefaultUser
 relationship 928aa50d-6074-4829-9ce8-86db3e50033e
 	fromColumn: fact_call.hcp_key
 	toColumn: dim_hcp.hcp_key
+
+relationship 27f06943-1559-4f51-a32f-991e91de890b
+	fromColumn: fact_call.hco_key
+	toColumn: dim_hco.hco_key
 
 relationship 9542bb19-f297-47c9-b3e6-06b28df3ab14
 	fromColumn: fact_call.credit_user_key

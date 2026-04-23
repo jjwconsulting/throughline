@@ -41,6 +41,13 @@ export const mappingKindEnum = pgEnum("mapping_kind", [
   "custom_grouping",
 ]);
 
+export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
+  "admin",
+  "manager",
+  "rep",
+  "bypass",
+]);
+
 export const tenant = pgTable(
   "tenant",
   {
@@ -171,6 +178,12 @@ export const tenantUser = pgTable(
       .notNull()
       .references(() => tenant.id, { onDelete: "cascade" }),
     userEmail: text("user_email").notNull(),
+    role: tenantUserRoleEnum("role").notNull().default("rep"),
+    // The Veeva user_key in gold.dim_user this Clerk user maps to.
+    // Required for role='rep' (so we can scope queries to their calls);
+    // null is fine for admin/manager/bypass who don't correspond to a
+    // single Veeva rep. See docs/architecture/rls.md.
+    veevaUserKey: text("veeva_user_key"),
     effectiveTerritoryIds: text("effective_territory_ids").array(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -178,5 +191,9 @@ export const tenantUser = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.userEmail] }),
+    repNeedsUserKey: check(
+      "tenant_user_rep_needs_user_key",
+      sql`${t.role} <> 'rep' OR ${t.veevaUserKey} IS NOT NULL`,
+    ),
   }),
 );

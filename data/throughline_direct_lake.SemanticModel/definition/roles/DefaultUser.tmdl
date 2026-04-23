@@ -5,6 +5,8 @@ role DefaultUser
 
 	tablePermission dim_hcp = [tenant_id] = CUSTOMDATA()
 
+	tablePermission dim_hco = [tenant_id] = CUSTOMDATA()
+
 	tablePermission dim_user = [tenant_id] = CUSTOMDATA()
 
 	tablePermission fact_call = [tenant_id] = CUSTOMDATA()

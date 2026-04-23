@@ -1,0 +1,127 @@
+table dim_hco
+	lineageTag: 76d7781c-1e8c-405f-8754-2271750e9abf
+	sourceLineageTag: [gold].[dim_hco]
+
+	column hco_key
+		dataType: string
+		lineageTag: 66657771-fe91-49c5-b975-17d0dea30e41
+		sourceLineageTag: hco_key
+		summarizeBy: none
+		sourceColumn: hco_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: 22070682-5ebb-4a2e-b2a2-ea52a7cfa796
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_account_id
+		dataType: string
+		lineageTag: da435ae3-c859-46ce-a8a6-b1c746c255c7
+		sourceLineageTag: veeva_account_id
+		summarizeBy: none
+		sourceColumn: veeva_account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column name
+		dataType: string
+		lineageTag: 8f712689-7f3d-4ce4-8972-8c01bf21bd5a
+		sourceLineageTag: name
+		summarizeBy: none
+		sourceColumn: name
+
+		annotation SummarizationSetBy = Automatic
+
+	column hco_type
+		dataType: string
+		lineageTag: afae2c3c-7f7d-4957-81d5-c075bca54915
+		sourceLineageTag: hco_type
+		summarizeBy: none
+		sourceColumn: hco_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column hospital_type
+		dataType: string
+		lineageTag: 7946ac59-91e2-42a8-935b-f2febcad0965
+		sourceLineageTag: hospital_type
+		summarizeBy: none
+		sourceColumn: hospital_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_group
+		dataType: string
+		lineageTag: 0c982af8-0cb9-4fad-bda8-7bdb51af18b4
+		sourceLineageTag: account_group
+		summarizeBy: none
+		sourceColumn: account_group
+
+		annotation SummarizationSetBy = Automatic
+
+	column city
+		dataType: string
+		lineageTag: 857ec3ed-1df2-4825-8832-f820e8be5617
+		sourceLineageTag: city
+		summarizeBy: none
+		sourceColumn: city
+
+		annotation SummarizationSetBy = Automatic
+
+	column state
+		dataType: string
+		lineageTag: bb16b039-22ce-4e3c-a167-45331ffec08d
+		sourceLineageTag: state
+		summarizeBy: none
+		sourceColumn: state
+
+		annotation SummarizationSetBy = Automatic
+
+	column status
+		dataType: string
+		lineageTag: 106b83ac-d0db-4914-9a86-4cb8d2e0122f
+		sourceLineageTag: status
+		summarizeBy: none
+		sourceColumn: status
+
+		annotation SummarizationSetBy = Automatic
+
+	column tier
+		dataType: string
+		lineageTag: ba79aa64-5689-4e92-a3a2-aa5269a212ff
+		sourceLineageTag: tier
+		summarizeBy: none
+		sourceColumn: tier
+
+		annotation SummarizationSetBy = Automatic
+
+	column segmentation
+		dataType: string
+		lineageTag: e1446770-522d-465c-aea7-8e0a580fa19b
+		sourceLineageTag: segmentation
+		summarizeBy: none
+		sourceColumn: segmentation
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_type
+		dataType: string
+		lineageTag: ab8e266a-8692-4c9a-9b49-4e48327d1762
+		sourceLineageTag: account_type
+		summarizeBy: none
+		sourceColumn: account_type
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_hco = entity
+		mode: directLake
+		source
+			entityName: dim_hco
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

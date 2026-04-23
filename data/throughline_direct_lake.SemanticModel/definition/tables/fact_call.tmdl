@@ -38,6 +38,15 @@ table fact_call
 
 		annotation SummarizationSetBy = Automatic
 
+	column hco_key
+		dataType: string
+		lineageTag: 3230e21c-b25a-4390-9a2a-034358e8ccbc
+		sourceLineageTag: hco_key
+		summarizeBy: none
+		sourceColumn: hco_key
+
+		annotation SummarizationSetBy = Automatic
+
 	column owner_user_key
 		dataType: string
 		lineageTag: 036e64a2-72ef-4c25-94a1-75f322f42cd4

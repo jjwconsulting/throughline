@@ -28,9 +28,11 @@
 # foreign keys resolved into surrogate dim keys for clean star-schema joins.
 #
 # FK resolution:
-#   - account → dim_hcp (and/or dim_hco when we add it). HCPs first; if no
-#     match, account_key stays NULL — calls on HCOs not yet dim'd. Later
-#     we'll add dim_hco and resolve both.
+#   - account → dim_hcp (person accounts) AND dim_hco (organization accounts).
+#     The two are mutually exclusive per row: a call hits exactly one of the
+#     two account types, so exactly one of (hcp_key, hco_key) is non-NULL on
+#     any given row. Calls to neither (data quality issue) are still kept;
+#     both keys NULL.
 #   - owner_user, attributed_user → dim_user
 #   - call_date → dim_date
 #
@@ -57,6 +59,7 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   tenant_id               STRING    NOT NULL,
   veeva_call_id           STRING    NOT NULL,
   hcp_key                 STRING,
+  hco_key                 STRING,
   owner_user_key          STRING,
   attributed_user_key     STRING,
   credit_user_key         STRING,
@@ -103,6 +106,7 @@ SELECT
   c.tenant_id,
   c.veeva_call_id,
   hcp.hcp_key,
+  hco.hco_key,
   owner.user_key AS owner_user_key,
   attr.user_key  AS attributed_user_key,
   -- Default rep attribution: prefer attributed (user__v) when set, fall back
@@ -136,6 +140,9 @@ FROM silver.call c
 LEFT JOIN gold.dim_hcp hcp
   ON hcp.tenant_id = c.tenant_id
   AND hcp.veeva_account_id = c.account_id
+LEFT JOIN gold.dim_hco hco
+  ON hco.tenant_id = c.tenant_id
+  AND hco.veeva_account_id = c.account_id
 LEFT JOIN gold.dim_user owner
   ON owner.tenant_id = c.tenant_id
   AND owner.veeva_user_id = c.owner_user_id
@@ -171,6 +178,8 @@ spark.sql(f"""
   SELECT
     COUNT(*) AS total_calls,
     SUM(CASE WHEN hcp_key IS NOT NULL THEN 1 ELSE 0 END)              AS with_hcp,
+    SUM(CASE WHEN hco_key IS NOT NULL THEN 1 ELSE 0 END)              AS with_hco,
+    SUM(CASE WHEN hcp_key IS NULL AND hco_key IS NULL THEN 1 ELSE 0 END) AS with_neither,
     SUM(CASE WHEN owner_user_key IS NOT NULL THEN 1 ELSE 0 END)       AS with_owner_user,
     SUM(CASE WHEN attributed_user_key IS NOT NULL THEN 1 ELSE 0 END)  AS with_attributed_user,
     SUM(CASE WHEN call_date_key IS NOT NULL THEN 1 ELSE 0 END)        AS with_call_date,
