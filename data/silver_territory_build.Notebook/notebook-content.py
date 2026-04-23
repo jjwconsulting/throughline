@@ -74,9 +74,23 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
   owner_user_id        STRING,
   country              STRING,
   status               STRING,
+  team_role            STRING,
   silver_built_at      TIMESTAMP NOT NULL
 ) USING DELTA
 """)
+
+# Tenant-specific rules for deriving team role from territory description.
+# Fennec encodes team in description text: '...SAM...' = Sales Account Manager,
+# '...KAD...' = Key Account Director, else = ALL (catch-all for MSL/general).
+# Other tenants will have their own conventions; this dict is the seam for
+# adding their rules. Long-term: move to a config table per tenant.
+TEAM_ROLE_RULES: dict[str, list[tuple[str, str]]] = {
+    "veeva": [
+        ("%SAM%", "SAM"),
+        ("%KAD%", "KAD"),
+    ],
+}
+TEAM_ROLE_DEFAULT = "ALL"
 
 # METADATA ********************
 
@@ -175,6 +189,23 @@ def build_group_select(
                 projections.append(f"  ranked.`{bronze_col}` AS {silver_col}")
         else:
             projections.append(f"  CAST(NULL AS STRING) AS {silver_col}")
+
+    # Derive team_role from description per per-source rules.
+    # If no description column is mapped, default to TEAM_ROLE_DEFAULT.
+    description_bronze_col = col_map.get("description")
+    rules = TEAM_ROLE_RULES.get(source_system, [])
+    if description_bronze_col and rules:
+        when_clauses = "\n           ".join(
+            f"WHEN UPPER(ranked.`{description_bronze_col}`) LIKE '{pattern}' THEN '{role}'"
+            for pattern, role in rules
+        )
+        projections.append(
+            f"  CASE\n           {when_clauses}\n           "
+            f"ELSE '{TEAM_ROLE_DEFAULT}'\n         END AS team_role"
+        )
+    else:
+        projections.append(f"  '{TEAM_ROLE_DEFAULT}' AS team_role")
+
     projections.append(f"  current_timestamp() AS silver_built_at")
 
     join_block = "\n".join(picklist_joins)
@@ -233,9 +264,17 @@ print(f"Wrote {row_count:,} rows to {SILVER_TABLE}")
 
 # CELL ********************
 
+print("=== Team role distribution ===")
+spark.sql(f"""
+  SELECT team_role, COUNT(*) AS n
+  FROM {SILVER_TABLE}
+  GROUP BY team_role
+  ORDER BY n DESC
+""").show(truncate=False)
+
 print("=== Sample territories ===")
 spark.sql(f"""
-  SELECT veeva_territory_id, name, api_name, country, status, parent_territory_id
+  SELECT veeva_territory_id, name, description, team_role, country, status
   FROM {SILVER_TABLE}
   ORDER BY name
   LIMIT 20
