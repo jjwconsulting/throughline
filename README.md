@@ -39,8 +39,32 @@ Requires Node 20+ and pnpm 9+.
 - **Web:** Next.js 16 + TypeScript + Tailwind v4
 - **Auth:** Clerk for MVP → Entra/Azure AD B2B when first enterprise pharma asks
 - **App DB:** Postgres (Supabase or Azure Postgres Flex) — app state only, analytics stays in Fabric
-- **Power BI embed:** app-owns-data via service principal, RLS per user via `EffectiveIdentity`
+- **Power BI embed:** app-owns-data via service principal, **Direct Lake** semantic model with `customData`-based RLS (see ARCHITECTURE.md §5 for the cloud-connection binding setup)
 - **Billing:** Stripe (self-serve tiers); enterprise = annual MSA separate
+
+## Build state (snapshot 2026-04-23)
+
+### Working end-to-end against fennec's real Veeva data
+
+- **Bronze ingest:** SFTP file drop (CSV → Delta), Veeva Direct Data API (FULL daily + incremental ~15-min batches with cursor-tracked idempotency in `ops.veeva_ingest_log`)
+- **Silver layer (8 entities):** `picklist`, `hcp` (78,668), `hco` (24,938), `user` (91), `territory` (50, with team_role derivation), `call` (22,814), `account_territory` (~225k bridge), `user_territory` (~80 bridge), `account_xref` (synthetic SFTP fixture)
+- **Gold layer (4 tables):** `dim_date` (2020–2030), `dim_hcp`, `dim_user` (with `is_active` + `is_field_user` flags), `fact_call` (with `credit_user_key` COALESCE pattern)
+- **Web app:** Clerk auth, `/admin/tenants` CRUD page, `/dashboard` Power BI embed (Direct Lake + per-user RLS via `customData`)
+- **Config plane:** Postgres → Fabric `config.*` sync notebook keeps the two stores aligned
+
+### Not yet wired
+
+- **PBI semantic model still points at the synthetic 7-row dim_account.** Real `gold.fact_call` exists but isn't surfaced in the dashboard yet.
+- `gold.dim_hco`, `gold.dim_territory`, gold-layer bridges — silver bridges work for now; promote when reporting needs it.
+- `silver.user_territory_assignment_scd2` for point-in-time rep attribution (current bridge is current-state only).
+- Production scheduling — every notebook runs manually today.
+- Tenant variability rules registry — hardcoded per-fennec rules with comments marking them; refactor when tenant #2 lands.
+- Invite flow / Clerk webhook → `tenant_user`. Current onboarding is hand-run SQL.
+- Tests. Architecture §9.9 calls for them; we have zero.
+
+### Immediate next milestone
+
+**Repoint the PBI dashboard to `gold.fact_call`** — update the semantic model to use real gold tables, build a "calls per rep / specialty / quarter" report. Once this lights up, the full SaaS loop is demoable with real fennec data.
 
 ## Still open
 

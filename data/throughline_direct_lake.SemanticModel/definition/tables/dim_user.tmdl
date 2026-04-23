@@ -1,0 +1,102 @@
+table dim_user
+	lineageTag: b3663755-7870-4590-90cf-88f13109707b
+	sourceLineageTag: [gold].[dim_user]
+
+	column user_key
+		dataType: string
+		lineageTag: 3eddce63-3ef1-4d37-bece-30ea3bb96e43
+		sourceLineageTag: user_key
+		summarizeBy: none
+		sourceColumn: user_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: 06f95705-3f72-47e9-aa4a-3f248a0c46ca
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_user_id
+		dataType: string
+		lineageTag: 95270e00-9aa3-404a-b4c3-59c700e9656e
+		sourceLineageTag: veeva_user_id
+		summarizeBy: none
+		sourceColumn: veeva_user_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column name
+		dataType: string
+		lineageTag: e8e22418-bc34-44d2-bc11-30587ad7625f
+		sourceLineageTag: name
+		summarizeBy: none
+		sourceColumn: name
+
+		annotation SummarizationSetBy = Automatic
+
+	column email
+		dataType: string
+		lineageTag: f9fb6d7d-4a72-43aa-be59-748a32afb494
+		sourceLineageTag: email
+		summarizeBy: none
+		sourceColumn: email
+
+		annotation SummarizationSetBy = Automatic
+
+	column title
+		dataType: string
+		lineageTag: c546df9d-9105-48d8-898f-f07e7c7e8318
+		sourceLineageTag: title
+		summarizeBy: none
+		sourceColumn: title
+
+		annotation SummarizationSetBy = Automatic
+
+	column user_type
+		dataType: string
+		lineageTag: dab04c43-57f0-4c33-8b8a-a31793032728
+		sourceLineageTag: user_type
+		summarizeBy: none
+		sourceColumn: user_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column status
+		dataType: string
+		lineageTag: d8c5d25c-8312-416e-829d-8015bb5a6d78
+		sourceLineageTag: status
+		summarizeBy: none
+		sourceColumn: status
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_active
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 6edda6b4-ac98-4fa7-866a-eea3e8bcb252
+		sourceLineageTag: is_active
+		summarizeBy: none
+		sourceColumn: is_active
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_field_user
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: dbfe0454-54c9-4bd0-8a16-492ce349ccb1
+		sourceLineageTag: is_field_user
+		summarizeBy: none
+		sourceColumn: is_field_user
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_user = entity
+		mode: directLake
+		source
+			entityName: dim_user
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

@@ -1,0 +1,127 @@
+table dim_hcp
+	lineageTag: 822f8d2b-3323-4f24-a677-2b15b0a60434
+	sourceLineageTag: [gold].[dim_hcp]
+
+	column hcp_key
+		dataType: string
+		lineageTag: be972c5a-03d6-40d6-84ec-08d3c099cf95
+		sourceLineageTag: hcp_key
+		summarizeBy: none
+		sourceColumn: hcp_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: 5ccdb7da-2107-47bf-b7b4-d8ec848ea5f7
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_account_id
+		dataType: string
+		lineageTag: b29c1bed-81fd-4714-8468-719950c23afc
+		sourceLineageTag: veeva_account_id
+		summarizeBy: none
+		sourceColumn: veeva_account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column name
+		dataType: string
+		lineageTag: cfceeaf0-d39d-4462-a756-adece9923ea3
+		sourceLineageTag: name
+		summarizeBy: none
+		sourceColumn: name
+
+		annotation SummarizationSetBy = Automatic
+
+	column npi
+		dataType: string
+		lineageTag: 4ff3c5b8-55e9-4105-bb13-f2a129e79191
+		sourceLineageTag: npi
+		summarizeBy: none
+		sourceColumn: npi
+
+		annotation SummarizationSetBy = Automatic
+
+	column specialty_primary
+		dataType: string
+		lineageTag: 07cb01c4-0365-4dbd-85b5-91d8dece0471
+		sourceLineageTag: specialty_primary
+		summarizeBy: none
+		sourceColumn: specialty_primary
+
+		annotation SummarizationSetBy = Automatic
+
+	column specialty_secondary
+		dataType: string
+		lineageTag: 28a1924d-4e33-4bd9-9430-87deea8a4562
+		sourceLineageTag: specialty_secondary
+		summarizeBy: none
+		sourceColumn: specialty_secondary
+
+		annotation SummarizationSetBy = Automatic
+
+	column credentials
+		dataType: string
+		lineageTag: e627b5bb-cc15-48d1-853e-1cc80c0b1df6
+		sourceLineageTag: credentials
+		summarizeBy: none
+		sourceColumn: credentials
+
+		annotation SummarizationSetBy = Automatic
+
+	column city
+		dataType: string
+		lineageTag: 43ff3812-c4db-4da1-94b4-8df0dfbffd9c
+		sourceLineageTag: city
+		summarizeBy: none
+		sourceColumn: city
+
+		annotation SummarizationSetBy = Automatic
+
+	column state
+		dataType: string
+		lineageTag: f19d04bf-f215-483b-833b-0afd83a63482
+		sourceLineageTag: state
+		summarizeBy: none
+		sourceColumn: state
+
+		annotation SummarizationSetBy = Automatic
+
+	column status
+		dataType: string
+		lineageTag: 02611521-3d26-4a6d-932b-0193407c3041
+		sourceLineageTag: status
+		summarizeBy: none
+		sourceColumn: status
+
+		annotation SummarizationSetBy = Automatic
+
+	column tier
+		dataType: string
+		lineageTag: a2b795ec-6951-43c4-b455-cb6a4a3c36e4
+		sourceLineageTag: tier
+		summarizeBy: none
+		sourceColumn: tier
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_type
+		dataType: string
+		lineageTag: 78fe7aba-f775-4812-91d1-b22a9d309330
+		sourceLineageTag: account_type
+		summarizeBy: none
+		sourceColumn: account_type
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_hcp = entity
+		mode: directLake
+		source
+			entityName: dim_hcp
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

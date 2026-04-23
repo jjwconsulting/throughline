@@ -1,0 +1,139 @@
+table fact_call
+	lineageTag: be88d445-840e-42c7-a61a-062a203fc157
+	sourceLineageTag: [gold].[fact_call]
+
+	column call_key
+		dataType: string
+		lineageTag: e0c45673-7fbe-411e-bdb0-f161ae9c184b
+		sourceLineageTag: call_key
+		summarizeBy: none
+		sourceColumn: call_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: eba244f5-601d-4ce3-b1d2-aead849b3333
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column veeva_call_id
+		dataType: string
+		lineageTag: 19919086-35e3-4c2e-b67b-9f42f102f421
+		sourceLineageTag: veeva_call_id
+		summarizeBy: none
+		sourceColumn: veeva_call_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column hcp_key
+		dataType: string
+		lineageTag: e1bcfbe4-b936-4382-b222-13623ebcf823
+		sourceLineageTag: hcp_key
+		summarizeBy: none
+		sourceColumn: hcp_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column owner_user_key
+		dataType: string
+		lineageTag: 036e64a2-72ef-4c25-94a1-75f322f42cd4
+		sourceLineageTag: owner_user_key
+		summarizeBy: none
+		sourceColumn: owner_user_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column attributed_user_key
+		dataType: string
+		lineageTag: 1f25fecf-884b-4252-888d-35d98422971f
+		sourceLineageTag: attributed_user_key
+		summarizeBy: none
+		sourceColumn: attributed_user_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column credit_user_key
+		dataType: string
+		lineageTag: 651a552b-aa7c-40ba-a054-6c58a9e86f91
+		sourceLineageTag: credit_user_key
+		summarizeBy: none
+		sourceColumn: credit_user_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column call_date_key
+		dataType: int64
+		formatString: 0
+		lineageTag: 78838634-cd92-4d51-8f67-1c4f8cc03a5b
+		sourceLineageTag: call_date_key
+		summarizeBy: none
+		sourceColumn: call_date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column call_date
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 09e6e209-7bdf-41ee-9c5c-e519a1d8e432
+		sourceLineageTag: call_date
+		summarizeBy: none
+		sourceColumn: call_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column call_type
+		dataType: string
+		lineageTag: 010babc4-cca3-48dc-81da-a1d20f6dce0c
+		sourceLineageTag: call_type
+		summarizeBy: none
+		sourceColumn: call_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column call_channel
+		dataType: string
+		lineageTag: f8fa04d1-0c47-4830-aea3-5c242bddbccf
+		sourceLineageTag: call_channel
+		summarizeBy: none
+		sourceColumn: call_channel
+
+		annotation SummarizationSetBy = Automatic
+
+	column status
+		dataType: string
+		lineageTag: 99b70f70-395f-4100-acfb-70ed7bd786e4
+		sourceLineageTag: status
+		summarizeBy: none
+		sourceColumn: status
+
+		annotation SummarizationSetBy = Automatic
+
+	column call_count
+		dataType: int64
+		formatString: 0
+		lineageTag: 5f6d5a8f-94f8-458d-ab45-0cd854031b4a
+		sourceLineageTag: call_count
+		summarizeBy: sum
+		sourceColumn: call_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column duration_minutes
+		dataType: double
+		lineageTag: 6b9c936c-cdd8-49aa-b147-4dbd9e5d8491
+		sourceLineageTag: duration_minutes
+		summarizeBy: sum
+		sourceColumn: duration_minutes
+
+		annotation SummarizationSetBy = Automatic
+
+	partition fact_call = entity
+		mode: directLake
+		source
+			entityName: fact_call
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

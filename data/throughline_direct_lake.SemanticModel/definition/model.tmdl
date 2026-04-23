@@ -15,6 +15,32 @@ annotation PBI_ProTooling = ["DirectLakeOnOneLakeInWeb","WebModelingEdit"]
 ref table mapping
 ref table dim_account
 ref table tenant_user
+ref table dim_date
+ref table dim_hcp
+ref table dim_user
+ref table fact_call
 
 ref role DefaultUser
+
+relationship 928aa50d-6074-4829-9ce8-86db3e50033e
+	fromColumn: fact_call.hcp_key
+	toColumn: dim_hcp.hcp_key
+
+relationship 9542bb19-f297-47c9-b3e6-06b28df3ab14
+	fromColumn: fact_call.credit_user_key
+	toColumn: dim_user.user_key
+
+relationship 832f2726-a263-4b5d-8ca7-e8015338a661
+	isActive: false
+	fromColumn: fact_call.owner_user_key
+	toColumn: dim_user.user_key
+
+relationship a47b4b30-f65a-40e8-8cb4-442f2abcdfdf
+	isActive: false
+	fromColumn: fact_call.attributed_user_key
+	toColumn: dim_user.user_key
+
+relationship 0b49bd35-5101-4b4a-91bd-117e2ced4fcb
+	fromColumn: fact_call.call_date_key
+	toColumn: dim_date.date_key
 
