@@ -273,11 +273,15 @@ print(f"Wrote {row_count:,} rows to {SILVER_TABLE}")
 
 # CELL ********************
 
+# Note: tenants vary in which field they use for active/inactive.
+# Fennec uses `status` ('Active'/'Inactive'); the `isactive__v` field is
+# universally 'false' regardless of reality. Other tenants may use isactive__v.
+# Reporting against silver.user should prefer `status` as the lifecycle field.
 print("=== Per-tenant counts ===")
 spark.sql(f"""
   SELECT tenant_id, COUNT(*) AS users,
-         SUM(CASE WHEN is_active = 'true' THEN 1 ELSE 0 END) AS active,
-         SUM(CASE WHEN is_active = 'false' THEN 1 ELSE 0 END) AS inactive
+         SUM(CASE WHEN LOWER(status) = 'active' THEN 1 ELSE 0 END) AS active,
+         SUM(CASE WHEN LOWER(status) = 'inactive' THEN 1 ELSE 0 END) AS inactive
   FROM {SILVER_TABLE}
   GROUP BY tenant_id
 """).show(truncate=False)
