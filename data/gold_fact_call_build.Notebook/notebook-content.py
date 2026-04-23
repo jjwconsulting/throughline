@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   hcp_key                 STRING,
   owner_user_key          STRING,
   attributed_user_key     STRING,
+  credit_user_key         STRING,
   call_date_key           INT,
   call_date               DATE,
   call_datetime           TIMESTAMP,
@@ -104,6 +105,12 @@ SELECT
   hcp.hcp_key,
   owner.user_key AS owner_user_key,
   attr.user_key  AS attributed_user_key,
+  -- Default rep attribution: prefer attributed (user__v) when set, fall back
+  -- to owner (ownerid__v). Fennec leaves user__v blank on most calls and uses
+  -- owner as the credit field. Other tenants may populate user__v reliably.
+  -- This is fennec-aware logic that will move to a tenant-config rule when
+  -- tenant #2 lands (see docs/architecture/tenant-variability.md cat 3).
+  COALESCE(attr.user_key, owner.user_key) AS credit_user_key,
   CAST(date_format(TRY_CAST(c.call_date AS DATE), 'yyyyMMdd') AS INT) AS call_date_key,
   TRY_CAST(c.call_date AS DATE)            AS call_date,
   TRY_CAST(c.call_datetime AS TIMESTAMP)   AS call_datetime,
@@ -180,11 +187,12 @@ spark.sql(f"""
   ORDER BY d.year_quarter
 """).show(20, truncate=False)
 
-print("=== Top 10 reps by call count ===")
+print("=== Top 10 reps by call count (using credit_user_key) ===")
 spark.sql(f"""
   SELECT u.name AS rep, COUNT(*) AS calls, ROUND(AVG(f.duration_minutes), 1) AS avg_duration
   FROM {GOLD_TABLE} f
-  JOIN gold.dim_user u ON u.user_key = f.attributed_user_key
+  JOIN gold.dim_user u ON u.user_key = f.credit_user_key
+  WHERE u.is_field_user = TRUE
   GROUP BY u.name
   ORDER BY calls DESC
 """).show(10, truncate=False)

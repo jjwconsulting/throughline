@@ -206,17 +206,19 @@ Tenant-specific custom fields that don't fit the standard silver schema either d
 
 One Power BI semantic model committed under `data/` via Fabric Git integration. Sits on `gold.*` tables.
 
-### Current choice: Import mode, shared model, customData-based RLS
+### Current choice: Direct Lake, shared model, customData-based RLS
 
-**Storage mode: Import** (not Direct Lake). Reason below.
+**Storage mode: Direct Lake** (validated working end-to-end 2026-04-23).
 
 **RLS pattern:**
 
-The web app resolves the signed-in user's `tenant_id` from Postgres `tenant_user` *before* minting the embed token, and passes the UUID as `customData` in the V2 GenerateToken identity. A single DAX role filters every fact/dim:
+The web app resolves the signed-in user's `tenant_id` from Postgres `tenant_user` *before* minting the embed token, and passes the UUID as `customData` in the V2 GenerateToken identity. A DAX role filters every tenant-scoped table:
 
 ```
 [tenant_id] = CUSTOMDATA()
 ```
+
+Note: no quotes around `CUSTOMDATA()` — it's a DAX function call, not a string literal. Every table with a `tenant_id` column needs its own `tablePermission` line in the role; RLS does not propagate through relationships without bidirectional cross-filters, which §9.8 forbids.
 
 Embed token shape (actual code in `apps/web/lib/powerbi.ts`):
 
@@ -235,31 +237,35 @@ POST /v1.0/myorg/GenerateToken
 }
 ```
 
-**Why `customData` and not `USERPRINCIPALNAME()`:** effective identity against the lakehouse datasource isn't resolvable the way it is for DirectQuery sources — Direct Lake reads Delta files, there's no per-user query execution. `customData` is Microsoft's supported escape hatch: arbitrary context passed through the embed token into DAX via `CUSTOMDATA()`. Sidesteps the whole SSO/effective-identity question.
+**Why `customData` and not `USERPRINCIPALNAME()`:** embedded end users do not exist in our Entra tenant — they live in Clerk (or whatever app-side auth we land on). `USERPRINCIPALNAME()` would require per-user Entra identities, which defeats app-owns-data. `customData` is Microsoft's supported escape hatch for multi-tenant SaaS embed: arbitrary string passed through the embed token into DAX via `CUSTOMDATA()`. The app is the authoritative source of "which tenant is this user" (via Postgres `tenant_user`), and the UUID it passes becomes the RLS filter.
 
-### Why Import mode (and when to reconsider)
+### Required Fabric setup for Direct Lake + SP embed
 
-Direct Lake is the architecturally preferred mode — reads Delta live, no refresh jobs, matches our lakehouse storage. But as of 2026-Q2, Fabric's V2 GenerateToken endpoint **rejects any embed token with a populated `identities` array for Direct Lake datasets**, with error: `"Creating embed token with effective identity is not supported for this datasource"`. This breaks RLS for service-principal embed — the only auth pattern available for app-owns-data.
+The combo of Direct Lake + per-user RLS + app-owns-data embed requires specific connection plumbing. Without these, `GenerateToken` rejects any call with a populated `identities` array for a Direct Lake dataset with `"Creating embed token with effective identity is not supported for this datasource"`. This error is not a product limitation — it's what the default OAuth-SSO OneLake binding does when asked to accept a custom identity. Fix: swap the binding.
 
-Import mode doesn't have this limitation. RLS via `customData` works out of the box. Refresh cost on our config+dim data volumes is trivial; daily refresh is fine.
+1. **Cloud connection:** type = OneLake, authentication = Service Principal, SSO = **disabled**. Same SP the web app uses (`POWERBI_CLIENT_ID` / `POWERBI_CLIENT_SECRET`).
+2. **Rebind the Direct Lake semantic model** to that connection (workspace → model → Settings → Gateway and cloud connections).
+3. **SP lakehouse permissions:** the SP needs **Read + ReadAll** on the `throughline_lakehouse` *artifact* (not just workspace membership). Direct Lake reads Delta files directly; workspace-level access doesn't cover that path.
+4. **No RLS at the SQL analytics endpoint.** Endpoint-level RLS forces Direct Lake to fall back to DirectQuery on every query and erases the performance benefit. Keep all per-tenant filtering in the semantic model's DAX role.
+5. **V2 embed token** (V1 isn't supported for Direct Lake embed).
 
-**Revisit Direct Lake when:**
-- Microsoft lifts the restriction (monitor Fabric release notes)
-- Our gold volumes start pushing Import mode memory limits (unlikely for years at typical pharma-commercial scale; life-sciences facts are usually wide but not deep)
-- We hit refresh-latency pain (e.g., near-real-time dashboards required)
+### When to reconsider
 
-### Fallback if Direct Lake + RLS stays broken and we need it
+- **Move to Import mode** if Direct Lake framing latency or OneLake read bandwidth becomes user-visible at scale. Our gold data volumes (dims + tenant-scoped facts) are nowhere near that today.
+- **Move to per-tenant Direct Lake models** if the single-model RLS approach creates cross-tenant blast-radius concerns that customData filtering can't address (e.g., a regulatory requirement for physical separation, not just logical).
 
-**Per-tenant semantic models, shared workspace.** One semantic model per tenant, each with a hardcoded DAX role `[tenant_id] = "<that-tenant-uuid>"` and the service principal assigned to that role. Direct Lake works because the filter is baked in — no `identities` array passed at embed time.
+### Fallback: per-tenant semantic models, shared workspace
 
-Tradeoff: N semantic models to manage. Requires TMDL-as-code + a deploy pipeline for scale. Our silver/gold storage doesn't change; only the PBI presentation layer. Migration cost is bounded.
+Kept as a deep plan B. One semantic model per tenant, each with a hardcoded DAX role `[tenant_id] = "<that-tenant-uuid>"` and the service principal assigned to that role. No `identities` array needed at embed time because the filter is baked in.
+
+Tradeoff: N semantic models to manage. Requires TMDL-as-code + a deploy pipeline for scale. Silver/gold storage doesn't change; only the PBI presentation layer. Migration cost is bounded.
 
 Decision tree:
 
 ```
-Direct Lake + RLS becomes SP-friendly   →  collapse to A-Direct Lake (one model, live data)
-Import-mode refresh becomes painful     →  move to per-tenant Direct Lake models (pattern B)
-Neither happens                         →  stay on A-Import indefinitely (fine for many tenants)
+Current state                           →  A-Direct Lake (one model, customData RLS, live data)
+Framing / bandwidth pain                →  B-Import (one model, customData RLS, daily refresh)
+Hard tenant-isolation requirement       →  C-Per-tenant Direct Lake (N models, no identities array)
 ```
 
 ### BypassTenant role

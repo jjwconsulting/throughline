@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   manager_id           STRING,
   status               STRING,
   is_active            BOOLEAN   NOT NULL,
+  is_field_user        BOOLEAN   NOT NULL,
   activation_date      STRING,
   inactivation_date    STRING,
   gold_built_at        TIMESTAMP NOT NULL
@@ -100,6 +101,13 @@ SELECT
     WHEN LOWER(is_active) = 'false' THEN FALSE
     ELSE FALSE
   END AS is_active,
+  -- Strips system/integration accounts (Application Owner, Java SDK, etc.)
+  -- which have user_type = NULL despite status = 'Active'. Reports filter
+  -- on is_field_user for "real reps only" views.
+  CASE
+    WHEN user_type IN ('Sales', 'Medical') THEN TRUE
+    ELSE FALSE
+  END AS is_field_user,
   activation_date,
   inactivation_date,
   current_timestamp() AS gold_built_at
