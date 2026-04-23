@@ -67,6 +67,17 @@ MAPPED_COLUMNS = [
     "tier", "account_type", "source_id",
 ]
 
+# Silver columns that should be translated through silver.picklist.
+# For each, the build LEFT JOINs silver.picklist on (tenant, object, field, code)
+# and projects COALESCE(label, raw_code) so codes that fail to translate fall
+# back to their raw values. Booleans, free-text, and IDs stay out.
+PICKLIST_SILVER_COLUMNS: set[str] = {
+    "specialty_primary", "specialty_secondary",
+    "state", "country",
+    "status", "tier", "account_type",
+    "gender",
+}
+
 # Per-source-system rules. Each entry says how to identify HCPs in that
 # source's bronze tables and which columns key the dedup. Add a new entry
 # when ingesting a new source.
@@ -75,6 +86,9 @@ SOURCE_RULES: dict[str, dict[str, str]] = {
         "filter": "ispersonaccount__v = 'true'",
         "dedup_key_bronze": "id",
         "dedup_order_bronze": "modified_date__v",
+        # Strip this prefix from the bronze table name to get the Veeva object
+        # name used for picklist lookups (e.g. veeva_obj_account__v -> account__v).
+        "bronze_table_prefix_strip": "veeva_obj_",
     },
 }
 
@@ -190,24 +204,50 @@ def build_group_select(
     filter_clause = rules["filter"]
     dedup_key = rules["dedup_key_bronze"]
     dedup_order = rules["dedup_order_bronze"]
+    prefix_strip = rules.get("bronze_table_prefix_strip", "")
 
     bronze_schema = f"bronze_{slug_to_schema(tenant_slug)}"
     bronze_ref = f"{bronze_schema}.{bronze_table}"
 
-    # Project: literals + (bronze_id) + each silver column from field map
+    # Veeva object name used for picklist lookups
+    veeva_object = (
+        bronze_table[len(prefix_strip):] if prefix_strip and bronze_table.startswith(prefix_strip)
+        else bronze_table
+    )
+
+    # Project: literals + (bronze_id) + each silver column.
+    # For picklist columns: COALESCE(picklist_alias.label, raw_bronze_value).
+    # For non-picklist mapped columns: pass through raw bronze value.
+    # For unmapped columns: NULL.
     projections = [
         f"  '{tenant_id}' AS tenant_id",
         f"  uuid() AS id",
         f"  ranked.id AS veeva_account_id",
         f"  '{source_system}' AS source_system",
     ]
+    picklist_joins: list[str] = []
     for silver_col in MAPPED_COLUMNS:
         if silver_col in col_map:
             bronze_col = col_map[silver_col]
-            projections.append(f"  ranked.`{bronze_col}` AS {silver_col}")
+            if silver_col in PICKLIST_SILVER_COLUMNS:
+                alias = f"pl_{silver_col}"
+                picklist_joins.append(
+                    f"LEFT JOIN silver.picklist {alias}\n"
+                    f"  ON {alias}.tenant_id = '{tenant_id}'\n"
+                    f"  AND {alias}.object    = '{veeva_object}'\n"
+                    f"  AND {alias}.field     = '{bronze_col}'\n"
+                    f"  AND {alias}.code      = ranked.`{bronze_col}`"
+                )
+                projections.append(
+                    f"  COALESCE({alias}.label, ranked.`{bronze_col}`) AS {silver_col}"
+                )
+            else:
+                projections.append(f"  ranked.`{bronze_col}` AS {silver_col}")
         else:
             projections.append(f"  CAST(NULL AS STRING) AS {silver_col}")
     projections.append(f"  current_timestamp() AS silver_built_at")
+
+    join_block = "\n".join(picklist_joins)
 
     select = f"""
 WITH ranked AS (
@@ -222,6 +262,7 @@ WITH ranked AS (
 SELECT
 {','.join(chr(10) + p for p in projections)}
 FROM ranked
+{join_block}
 WHERE _rn = 1
 """
     return select
