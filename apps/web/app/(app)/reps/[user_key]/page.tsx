@@ -14,6 +14,11 @@ import {
   combineScopes,
 } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
+import {
+  findGoalContaining,
+  prorateGoalByBusinessDays,
+  attainmentLabel,
+} from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
 import TrendChart from "../../dashboard/trend-chart";
 import FilterBar from "../../dashboard/filter-bar";
@@ -22,6 +27,7 @@ import {
   parseFilters,
   chartWeeks,
   periodLabel,
+  rangeDates,
 } from "../../dashboard/filters";
 
 export const dynamic = "force-dynamic";
@@ -107,12 +113,32 @@ export default async function RepDetail({
   // For a rep-role user, both clauses target owner_user_key — redundant
   // but harmless (they evaluate to the same row set).
   const sqlScope = combineScopes(repScope(user_key), scopeToSql(scope));
-  const [kpis, trend, topHcps, inactivitySignals] = await Promise.all([
+  const dateRange = rangeDates(filters.range);
+  const [kpis, trend, topHcps, inactivitySignals, goal] = await Promise.all([
     loadInteractionKpis(tenantId, filters, sqlScope),
     loadWeeklyTrend(tenantId, filters, sqlScope),
     loadTopHcps(tenantId, filters, sqlScope),
     loadHcpInactivitySignals(tenantId, sqlScope),
+    dateRange
+      ? findGoalContaining({
+          tenantId,
+          metric: "calls",
+          entityType: "rep",
+          entityId: user_key,
+          rangeStart: dateRange.start,
+          rangeEnd: dateRange.end,
+        })
+      : Promise.resolve(null),
   ]);
+  const proratedGoal =
+    goal && dateRange
+      ? await prorateGoalByBusinessDays({
+          tenantId,
+          goal,
+          rangeStart: dateRange.start,
+          rangeEnd: dateRange.end,
+        })
+      : null;
 
   const period = periodLabel(filters.range);
   const interactionLabel =
@@ -126,14 +152,19 @@ export default async function RepDetail({
   const reachValue =
     filters.account === "hco" ? "—" : formatNumber(kpis.hcps);
 
+  // Prefer attainment as the secondary line when this rep has a goal for the
+  // current period; fall back to vs-prior delta otherwise.
+  const interactionsSecondary =
+    proratedGoal != null && proratedGoal > 0
+      ? attainmentLabel(kpis.calls_period, proratedGoal).label
+      : filters.range === "all"
+        ? null
+        : deltaLabel(kpis.calls_period, kpis.calls_prior);
   const cards = [
     {
       label: `${interactionLabel} (${period})`,
       value: formatNumber(kpis.calls_period),
-      delta:
-        filters.range === "all"
-          ? null
-          : deltaLabel(kpis.calls_period, kpis.calls_prior),
+      delta: interactionsSecondary,
     },
     { label: `${reachLabel} (${period})`, value: reachValue, delta: null },
     {
@@ -194,7 +225,7 @@ export default async function RepDetail({
           </p>
         </div>
         <div className="px-2 py-4">
-          <TrendChart data={trend} />
+          <TrendChart data={trend} goalTotal={proratedGoal} />
         </div>
       </div>
 

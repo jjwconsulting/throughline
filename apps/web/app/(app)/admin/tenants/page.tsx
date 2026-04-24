@@ -19,12 +19,18 @@ export default async function TenantsPage() {
           Each tenant gets its own bronze schema in Fabric. Shared silver + gold
           filter by tenant_id.
         </p>
-        <p className="mt-2 text-sm">
+        <p className="mt-2 text-sm space-x-3">
           <Link
             href="/admin/users"
             className="text-[var(--color-primary)] hover:underline"
           >
             Manage users →
+          </Link>
+          <Link
+            href="/admin/goals"
+            className="text-[var(--color-primary)] hover:underline"
+          >
+            Goals →
           </Link>
         </p>
       </div>

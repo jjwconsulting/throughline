@@ -4,6 +4,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -12,7 +13,17 @@ import {
 
 type Point = { week_start: string; calls: number };
 
-export default function TrendChart({ data }: { data: Point[] }) {
+export default function TrendChart({
+  data,
+  goalTotal,
+}: {
+  data: Point[];
+  // Optional: total goal value across the displayed window. The chart
+  // renders a "Pace" reference line at goalTotal / data.length so each
+  // weekly bar can be compared to its expected share. Pass null/undefined
+  // when no goal exists for this window.
+  goalTotal?: number | null;
+}) {
   const formatted = data.map((d) => ({
     ...d,
     label: new Date(d.week_start).toLocaleDateString("en-US", {
@@ -20,6 +31,11 @@ export default function TrendChart({ data }: { data: Point[] }) {
       day: "numeric",
     }),
   }));
+
+  const weeklyPace =
+    goalTotal != null && goalTotal > 0 && data.length > 0
+      ? Math.round(goalTotal / data.length)
+      : null;
 
   return (
     <ResponsiveContainer width="100%" height={260}>
@@ -62,6 +78,20 @@ export default function TrendChart({ data }: { data: Point[] }) {
           strokeWidth={2}
           fill="url(#callsFill)"
         />
+        {weeklyPace != null ? (
+          <ReferenceLine
+            y={weeklyPace}
+            stroke="var(--color-primary)"
+            strokeDasharray="4 4"
+            strokeWidth={1.5}
+            label={{
+              value: `Pace ${weeklyPace.toLocaleString("en-US")}/wk`,
+              position: "insideTopRight",
+              fill: "var(--color-primary)",
+              fontSize: 11,
+            }}
+          />
+        ) : null}
       </AreaChart>
     </ResponsiveContainer>
   );

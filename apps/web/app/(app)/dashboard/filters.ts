@@ -92,6 +92,26 @@ export function rangeWeeks(range: Exclude<TimeRange, "all">): number {
   return { "4w": 4, "12w": 12, "26w": 26, "52w": 52 }[range];
 }
 
+// Concrete ISO date range backing the current filter selection. Returns null
+// for "all" — no meaningful start date when the user wants all of history.
+// Useful for non-SQL surfaces (goal lookups in Postgres) that need the same
+// time window as the dashboard's SQL queries.
+export function rangeDates(
+  range: TimeRange,
+): { start: string; end: string } | null {
+  if (range === "all") return null;
+  const today = new Date();
+  const todayUtc = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+  );
+  const start = new Date(todayUtc);
+  start.setUTCDate(start.getUTCDate() - rangeWeeks(range) * 7);
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: todayUtc.toISOString().slice(0, 10),
+  };
+}
+
 // Number of weekly buckets to render in the trend chart for a given range.
 // "all" falls back to 52 since weekly buckets across all time would be silly.
 export function chartWeeks(range: TimeRange): number {

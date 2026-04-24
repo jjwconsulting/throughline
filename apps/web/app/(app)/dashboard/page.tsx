@@ -8,12 +8,18 @@ import {
 } from "@/lib/interactions";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
+import {
+  sumRepGoalsForPeriod,
+  findGoalContaining,
+  prorateGoalByBusinessDays,
+  attainmentLabel,
+} from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
 import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
 import AccountToggle from "./account-toggle";
 import NoAccess from "./no-access";
-import { parseFilters, chartWeeks, periodLabel } from "./filters";
+import { parseFilters, chartWeeks, periodLabel, rangeDates } from "./filters";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +53,44 @@ export default async function Dashboard({
 
   // Top accounts: swap HCP table for HCO table when in HCO mode.
   const showHcos = filters.account === "hco";
-  const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals] =
+  // Goal lookup applies only on the calls metric for now, and only when the
+  // filter has a concrete date range (skip "all"). For per-rep scopes, the
+  // goal is the rep's own goal; for admin/manager, sum of goals across
+  // visible reps.
+  const dateRange = rangeDates(filters.range);
+  const goalLookup = (async () => {
+    if (!dateRange) return null;
+    if (scope.role === "rep") {
+      const goal = await findGoalContaining({
+        tenantId,
+        metric: "calls",
+        entityType: "rep",
+        entityId: scope.userKey,
+        rangeStart: dateRange.start,
+        rangeEnd: dateRange.end,
+      });
+      return goal
+        ? prorateGoalByBusinessDays({
+            tenantId,
+            goal,
+            rangeStart: dateRange.start,
+            rangeEnd: dateRange.end,
+          })
+        : null;
+    }
+    // admin / manager / bypass: sum of all (visible) rep goals. Tenant-wide
+    // sum doesn't have a single canonical period to prorate against, so we
+    // sum the unprorated targets for now. Refinement: prorate each goal
+    // individually then sum, when the right semantic becomes obvious.
+    return sumRepGoalsForPeriod({
+      tenantId,
+      metric: "calls",
+      rangeStart: dateRange.start,
+      rangeEnd: dateRange.end,
+    });
+  })();
+
+  const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals, periodGoal] =
     await Promise.all([
       loadInteractionKpis(tenantId, filters, rlsScope),
       loadWeeklyTrend(tenantId, filters, rlsScope),
@@ -62,6 +105,7 @@ export default async function Dashboard({
       // attention right now," regardless of which time window the rest of
       // the dashboard is showing.
       loadHcpInactivitySignals(tenantId, rlsScope),
+      goalLookup,
     ]);
 
   const period = periodLabel(filters.range);
@@ -75,14 +119,20 @@ export default async function Dashboard({
     filters.account === "hco" ? "HCOs reached" : "HCPs reached";
   const reachValue =
     filters.account === "hco" ? formatNumber(kpis.hcos) : formatNumber(kpis.hcps);
+  // For the interactions card, prefer attainment as the secondary line when
+  // a goal exists for this period; fall back to vs-prior delta otherwise.
+  // Goals are the more decision-useful signal when they exist.
+  const interactionsSecondary =
+    periodGoal != null && periodGoal > 0
+      ? attainmentLabel(kpis.calls_period, periodGoal).label
+      : filters.range === "all"
+        ? null
+        : deltaLabel(kpis.calls_period, kpis.calls_prior);
   const cards: { label: string; value: string; delta: string | null }[] = [
     {
       label: `${interactionLabel} (${period})`,
       value: formatNumber(kpis.calls_period),
-      delta:
-        filters.range === "all"
-          ? null
-          : deltaLabel(kpis.calls_period, kpis.calls_prior),
+      delta: interactionsSecondary,
     },
     { label: `${reachLabel} (${period})`, value: reachValue, delta: null },
     { label: `Active reps (${period})`, value: formatNumber(kpis.reps), delta: null },
@@ -128,7 +178,7 @@ export default async function Dashboard({
           </p>
         </div>
         <div className="px-2 py-4">
-          <TrendChart data={trend} />
+          <TrendChart data={trend} goalTotal={periodGoal} />
         </div>
       </div>
 

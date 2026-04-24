@@ -60,12 +60,21 @@ export default async function AdminUsersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link
-          href="/admin/tenants"
-          className="text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-        >
-          ← Tenants
-        </Link>
+        <div className="flex items-center gap-3 text-xs">
+          <Link
+            href="/admin/tenants"
+            className="text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
+          >
+            ← Tenants
+          </Link>
+          <span className="text-[var(--color-ink-muted)]">·</span>
+          <Link
+            href="/admin/goals"
+            className="text-[var(--color-primary)] hover:underline"
+          >
+            Goals →
+          </Link>
+        </div>
         <h1 className="font-display text-3xl mt-2">Users</h1>
         <p className="text-[var(--color-ink-muted)]">
           Invite users with their tenant + role pre-set. Clerk sends the

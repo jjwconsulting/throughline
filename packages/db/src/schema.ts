@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -46,6 +48,39 @@ export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
   "manager",
   "rep",
   "bypass",
+]);
+
+// Goal taxonomy. Open enums so we can extend without migrations as new
+// metrics/entities land. The web app + recommendation engine validate
+// against the values they actually understand.
+export const goalMetricEnum = pgEnum("goal_metric", [
+  "calls",
+  "units",
+  "revenue",
+  "reach_pct",
+  "frequency",
+]);
+
+export const goalEntityTypeEnum = pgEnum("goal_entity_type", [
+  "rep",
+  "territory",
+  "region",
+  "tier",
+  "tenant_wide",
+]);
+
+export const goalPeriodTypeEnum = pgEnum("goal_period_type", [
+  "month",
+  "quarter",
+  "year",
+  "custom",
+]);
+
+export const goalSourceEnum = pgEnum("goal_source", [
+  "manual",
+  "upload",
+  "recommended",
+  "scheduled",
 ]);
 
 export const tenant = pgTable(
@@ -194,6 +229,77 @@ export const tenantUser = pgTable(
     repNeedsUserKey: check(
       "tenant_user_rep_needs_user_key",
       sql`${t.role} <> 'rep' OR ${t.veevaUserKey} IS NOT NULL`,
+    ),
+  }),
+);
+
+// Goal — flexible schema supporting any metric × any entity × any period.
+// Authoring lives in Postgres (admin UI writes here); a goals_sync notebook
+// mirrors to gold.fact_goal in Fabric so analytics queries can join on
+// goal_value alongside fact_call/fact_sales.
+//
+// See docs/product/goals.md and the project memory:
+// project_goals_product_thesis.md (the 80/20 framing).
+export const goal = pgTable(
+  "goal",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    metric: goalMetricEnum("metric").notNull(),
+    entityType: goalEntityTypeEnum("entity_type").notNull(),
+    // The dim key value for the entity (e.g. dim_user.user_key for rep,
+    // dim_territory.territory_key for territory). Null when entity_type =
+    // 'tenant_wide' — the goal applies across the whole tenant.
+    entityId: text("entity_id"),
+    periodType: goalPeriodTypeEnum("period_type").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    // Numeric to avoid float drift on goals like $1,234,567.89.
+    goalValue: numeric("goal_value", { precision: 18, scale: 4 }).notNull(),
+    // Free-text unit ('count', 'usd', 'pct'). Per-metric defaults applied at
+    // write time; kept on the row for explicit display + future flexibility.
+    goalUnit: text("goal_unit").notNull(),
+    source: goalSourceEnum("source").notNull().default("manual"),
+    // The recommendation rationale captured at write time, if the goal was
+    // accepted from a recommendation. JSON-encoded {historical, peer_median,
+    // growth_rate_pct, method}. Null for purely manual goals.
+    recommendationContext: text("recommendation_context"),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // One goal per (metric, entity, period). Re-saves overwrite via upsert.
+    uniq: unique("goal_unique").on(
+      t.tenantId,
+      t.metric,
+      t.entityType,
+      t.entityId,
+      t.periodStart,
+      t.periodEnd,
+    ),
+    // entity_id is required EXCEPT for tenant_wide goals (where the entity
+    // IS the tenant itself, and entity_id stays null).
+    entityIdRequired: check(
+      "goal_entity_id_required",
+      sql`${t.entityType} = 'tenant_wide' OR ${t.entityId} IS NOT NULL`,
+    ),
+    // period_end must be on or after period_start.
+    periodOrdered: check(
+      "goal_period_ordered",
+      sql`${t.periodEnd} >= ${t.periodStart}`,
+    ),
+    // goal_value must be non-negative (a goal of zero is valid for "no
+    // expected activity"; negative is always wrong).
+    goalValueNonNegative: check(
+      "goal_value_non_negative",
+      sql`${t.goalValue} >= 0`,
     ),
   }),
 );
