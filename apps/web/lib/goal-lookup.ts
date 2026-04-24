@@ -8,163 +8,102 @@
 
 import { and, eq, gte, lte, schema } from "@throughline/db";
 import { db } from "@/lib/db";
-import { queryFabric } from "@/lib/fabric";
 
-export type GoalForPeriod = {
-  value: number;
-  unit: string;
-  source: string;
-  periodStart: string;
-  periodEnd: string;
-};
+export type GoalMetric =
+  | "calls"
+  | "units"
+  | "revenue"
+  | "reach_pct"
+  | "frequency";
+export type GoalEntityType =
+  | "rep"
+  | "territory"
+  | "region"
+  | "tier"
+  | "tenant_wide";
 
-// Find the goal whose period CONTAINS the supplied date range. Returns null
-// if no goal exists for this entity in any overlapping period.
+// ---------------------------------------------------------------------------
+// Sum of overlapping goal portions for a given range.
 //
-// Pattern: dashboard shows "Calls (last 12 weeks)" — the goal that matters is
-// the QUARTERLY goal whose period contains those weeks. We find the goal
-// whose period_start ≤ rangeStart AND period_end ≥ rangeEnd.
-export async function findGoalContaining(args: {
+// For every goal whose period OVERLAPS [rangeStart, rangeEnd]:
+//   overlap_days = max(0, min(period_end, rangeEnd) - max(period_start, rangeStart) + 1)
+//   contribution = goal_value * overlap_days / period_days
+// Returns the sum, or null if no goals overlap.
+//
+// This is the right semantic for chart display: a 12-week window spanning
+// Q1+Q2 picks up BOTH the Q1 goal (prorated to its overlap) and the Q2 goal
+// (prorated to its overlap), summed.
+//
+// `entityFilter`:
+//   - { type: "all" }          — sum across all entities of entityType (e.g.
+//                                 every rep) for tenant-wide attainment math
+//   - { type: "single", id }   — only this entity's goal
+//
+// Calendar-day proration. Business-day adjustment can be layered on top by
+// the caller via a single `gold.dim_date` query, but for v1 calendar is the
+// default — easier to reason about and avoids per-page Fabric round trips.
+// ---------------------------------------------------------------------------
+
+export type GoalEntityFilter =
+  | { type: "all" }
+  | { type: "single"; id: string };
+
+export async function loadOverlappingGoalSum(args: {
   tenantId: string;
-  metric: "calls" | "units" | "revenue" | "reach_pct" | "frequency";
-  entityType: "rep" | "territory" | "region" | "tier" | "tenant_wide";
-  entityId: string | null;
-  rangeStart: string; // ISO date
+  metric: GoalMetric;
+  entityType: GoalEntityType;
+  entityFilter: GoalEntityFilter;
+  rangeStart: string;
   rangeEnd: string;
-}): Promise<GoalForPeriod | null> {
+}): Promise<number | null> {
   const baseFilters = [
     eq(schema.goal.tenantId, args.tenantId),
     eq(schema.goal.metric, args.metric),
     eq(schema.goal.entityType, args.entityType),
-    lte(schema.goal.periodStart, args.rangeStart),
-    gte(schema.goal.periodEnd, args.rangeEnd),
+    // Overlap test: period_start <= rangeEnd AND period_end >= rangeStart.
+    // (i.e., the periods are not strictly disjoint.)
+    lte(schema.goal.periodStart, args.rangeEnd),
+    gte(schema.goal.periodEnd, args.rangeStart),
   ];
   const whereClause =
-    args.entityId == null
-      ? and(...baseFilters)
-      : and(...baseFilters, eq(schema.goal.entityId, args.entityId));
+    args.entityFilter.type === "single"
+      ? and(...baseFilters, eq(schema.goal.entityId, args.entityFilter.id))
+      : and(...baseFilters);
 
   const rows = await db
     .select({
       goalValue: schema.goal.goalValue,
-      goalUnit: schema.goal.goalUnit,
-      source: schema.goal.source,
       periodStart: schema.goal.periodStart,
       periodEnd: schema.goal.periodEnd,
     })
     .from(schema.goal)
-    .where(whereClause)
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    value: Number(row.goalValue),
-    unit: row.goalUnit,
-    source: row.source,
-    periodStart: row.periodStart,
-    periodEnd: row.periodEnd,
-  };
-}
-
-// Sum of all matching rep-level goals for a tenant in the period — used
-// when the dashboard shows tenant-wide metrics and we want "total goal" =
-// sum of individual rep goals. Falls back to null if no rep goals exist.
-export async function sumRepGoalsForPeriod(args: {
-  tenantId: string;
-  metric: "calls" | "units" | "revenue" | "reach_pct" | "frequency";
-  rangeStart: string;
-  rangeEnd: string;
-}): Promise<number | null> {
-  const rows = await db
-    .select({
-      goalValue: schema.goal.goalValue,
-    })
-    .from(schema.goal)
-    .where(
-      and(
-        eq(schema.goal.tenantId, args.tenantId),
-        eq(schema.goal.metric, args.metric),
-        eq(schema.goal.entityType, "rep"),
-        lte(schema.goal.periodStart, args.rangeStart),
-        gte(schema.goal.periodEnd, args.rangeEnd),
-      ),
-    );
+    .where(whereClause);
   if (rows.length === 0) return null;
-  return rows.reduce((acc, r) => acc + Number(r.goalValue), 0);
-}
 
-// Time-proration helper. A quarter goal is for the full quarter; if the
-// current display window is "last 12 weeks" and the quarter has 13 weeks
-// elapsed, the prorated goal target = (12/13) * quarter_goal. Avoids the
-// "you're at 30% of quarterly goal but only 20% through the quarter" trap.
-//
-// Uses CALENDAR days. For the more accurate business-day-aware version
-// that excludes weekends + US federal holidays, use prorateGoalByBusinessDays
-// (requires a Fabric round trip).
-export function prorateGoal(args: {
-  goal: GoalForPeriod;
-  rangeStart: string;
-  rangeEnd: string;
-}): number {
-  const { goal, rangeStart, rangeEnd } = args;
-  const periodMs =
-    new Date(goal.periodEnd).getTime() - new Date(goal.periodStart).getTime();
-  const rangeMs =
-    new Date(rangeEnd).getTime() - new Date(rangeStart).getTime();
-  if (periodMs <= 0) return goal.value;
-  const fraction = Math.min(1, Math.max(0, rangeMs / periodMs));
-  return goal.value * fraction;
-}
-
-// Business-day-aware proration. Pulls counts of business days from
-// gold.dim_date for both the goal's full period and the display window.
-// Use when the goal represents work-day activity (calls, visits) — calendar
-// proration overstates the expected target because reps don't work weekends
-// or holidays.
-//
-// Single Fabric round trip (one query returning both counts). Falls back
-// silently to calendar proration if `gold.dim_date` doesn't have the
-// `is_business_day` column yet (i.e., dim_date hasn't been rebuilt with the
-// new schema — typical during the first deploy).
-export async function prorateGoalByBusinessDays(args: {
-  tenantId: string;
-  goal: GoalForPeriod;
-  rangeStart: string;
-  rangeEnd: string;
-}): Promise<number> {
-  const { tenantId, goal, rangeStart, rangeEnd } = args;
-
-  try {
-    type Row = { period_business_days: number; range_business_days: number };
-    const rows = await queryFabric<Row>(
-      tenantId,
-      `SELECT
-         SUM(CASE WHEN d.date BETWEEN @periodStart AND @periodEnd AND d.is_business_day = 1 THEN 1 ELSE 0 END) AS period_business_days,
-         SUM(CASE WHEN d.date BETWEEN @rangeStart AND @rangeEnd AND d.is_business_day = 1 THEN 1 ELSE 0 END) AS range_business_days
-       FROM gold.dim_date d
-       WHERE d.date BETWEEN @periodStart AND @periodEnd
-         AND @tenantId IS NOT NULL`,
-      {
-        periodStart: goal.periodStart,
-        periodEnd: goal.periodEnd,
-        rangeStart,
-        rangeEnd,
-      },
-    );
-    const r = rows[0];
-    if (!r || r.period_business_days <= 0) return goal.value;
-    const fraction = Math.min(
-      1,
-      Math.max(0, r.range_business_days / r.period_business_days),
-    );
-    return goal.value * fraction;
-  } catch {
-    // dim_date probably hasn't been rebuilt with is_business_day yet.
-    // Fall back to the calendar-day proration so the page still works.
-    return prorateGoal({ goal, rangeStart, rangeEnd });
+  const rangeStartMs = new Date(args.rangeStart).getTime();
+  const rangeEndMs = new Date(args.rangeEnd).getTime();
+  let total = 0;
+  for (const row of rows) {
+    const periodStartMs = new Date(row.periodStart).getTime();
+    const periodEndMs = new Date(row.periodEnd).getTime();
+    const overlapStartMs = Math.max(periodStartMs, rangeStartMs);
+    const overlapEndMs = Math.min(periodEndMs, rangeEndMs);
+    if (overlapEndMs < overlapStartMs) continue; // shouldn't happen given WHERE, but defensive
+    const overlapDays = msToDays(overlapEndMs - overlapStartMs) + 1;
+    const periodDays = msToDays(periodEndMs - periodStartMs) + 1;
+    if (periodDays <= 0) continue;
+    total += Number(row.goalValue) * (overlapDays / periodDays);
   }
+  return total;
 }
+
+function msToDays(ms: number): number {
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+// ---------------------------------------------------------------------------
+// Display helper.
+// ---------------------------------------------------------------------------
 
 export function attainmentLabel(actual: number, goal: number): {
   pct: number;
@@ -174,6 +113,6 @@ export function attainmentLabel(actual: number, goal: number): {
   const pct = (actual / goal) * 100;
   return {
     pct,
-    label: `${actual.toLocaleString("en-US")} / ${goal.toLocaleString("en-US")} (${pct.toFixed(0)}%)`,
+    label: `${actual.toLocaleString("en-US")} / ${Math.round(goal).toLocaleString("en-US")} (${pct.toFixed(0)}%)`,
   };
 }

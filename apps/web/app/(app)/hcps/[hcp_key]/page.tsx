@@ -3,7 +3,7 @@ import Link from "next/link";
 import { queryFabric } from "@/lib/fabric";
 import {
   loadInteractionKpis,
-  loadWeeklyTrend,
+  loadTrend,
   hcpScope,
   type Scope,
 } from "@/lib/interactions";
@@ -12,7 +12,8 @@ import {
   filterClauses,
   filtersToParams,
   parseFilters,
-  chartWeeks,
+  chartBuckets,
+  GRANULARITY_LABELS,
   periodLabel,
   type DashboardFilters,
 } from "../../dashboard/filters";
@@ -143,7 +144,7 @@ export default async function HcpDetail({
   const sqlScope = combineScopes(hcpScope(hcp_key), scopeToSql(userScope));
   const [kpis, trend, callingReps] = await Promise.all([
     loadInteractionKpis(tenantId, filters, sqlScope),
-    loadWeeklyTrend(tenantId, filters, sqlScope),
+    loadTrend(tenantId, filters, sqlScope),
     loadHcpCallingReps(tenantId, filters, sqlScope),
   ]);
 
@@ -243,9 +244,12 @@ export default async function HcpDetail({
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">Calls per week</h2>
+          <h2 className="font-display text-lg">
+            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+          </h2>
           <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartWeeks(filters.range)} most recent weeks for {hcp.name}
+            {chartBuckets(filters)} most recent {filters.granularity}
+            {chartBuckets(filters) === 1 ? "" : "s"} for {hcp.name}
           </p>
         </div>
         <div className="px-2 py-4">

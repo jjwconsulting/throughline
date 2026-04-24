@@ -3,7 +3,7 @@ import Link from "next/link";
 import { queryFabric } from "@/lib/fabric";
 import {
   loadInteractionKpis,
-  loadWeeklyTrend,
+  loadTrend,
   loadTopHcps,
   repScope,
 } from "@/lib/interactions";
@@ -15,8 +15,7 @@ import {
 } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
 import {
-  findGoalContaining,
-  prorateGoalByBusinessDays,
+  loadOverlappingGoalSum,
   attainmentLabel,
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
@@ -25,7 +24,8 @@ import FilterBar from "../../dashboard/filter-bar";
 import AccountToggle from "../../dashboard/account-toggle";
 import {
   parseFilters,
-  chartWeeks,
+  chartBuckets,
+  GRANULARITY_LABELS,
   periodLabel,
   rangeDates,
 } from "../../dashboard/filters";
@@ -114,31 +114,23 @@ export default async function RepDetail({
   // but harmless (they evaluate to the same row set).
   const sqlScope = combineScopes(repScope(user_key), scopeToSql(scope));
   const dateRange = rangeDates(filters.range);
-  const [kpis, trend, topHcps, inactivitySignals, goal] = await Promise.all([
-    loadInteractionKpis(tenantId, filters, sqlScope),
-    loadWeeklyTrend(tenantId, filters, sqlScope),
-    loadTopHcps(tenantId, filters, sqlScope),
-    loadHcpInactivitySignals(tenantId, sqlScope),
-    dateRange
-      ? findGoalContaining({
-          tenantId,
-          metric: "calls",
-          entityType: "rep",
-          entityId: user_key,
-          rangeStart: dateRange.start,
-          rangeEnd: dateRange.end,
-        })
-      : Promise.resolve(null),
-  ]);
-  const proratedGoal =
-    goal && dateRange
-      ? await prorateGoalByBusinessDays({
-          tenantId,
-          goal,
-          rangeStart: dateRange.start,
-          rangeEnd: dateRange.end,
-        })
-      : null;
+  const [kpis, trend, topHcps, inactivitySignals, proratedGoal] =
+    await Promise.all([
+      loadInteractionKpis(tenantId, filters, sqlScope),
+      loadTrend(tenantId, filters, sqlScope),
+      loadTopHcps(tenantId, filters, sqlScope),
+      loadHcpInactivitySignals(tenantId, sqlScope),
+      dateRange
+        ? loadOverlappingGoalSum({
+            tenantId,
+            metric: "calls",
+            entityType: "rep",
+            entityFilter: { type: "single", id: user_key },
+            rangeStart: dateRange.start,
+            rangeEnd: dateRange.end,
+          })
+        : Promise.resolve(null),
+    ]);
 
   const period = periodLabel(filters.range);
   const interactionLabel =
@@ -219,13 +211,26 @@ export default async function RepDetail({
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">Calls per week</h2>
+          <h2 className="font-display text-lg">
+            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+          </h2>
           <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartWeeks(filters.range)} most recent weeks for {rep.name}
+            {chartBuckets(filters)} most recent {filters.granularity}
+            {chartBuckets(filters) === 1 ? "" : "s"} for {rep.name}
           </p>
         </div>
         <div className="px-2 py-4">
-          <TrendChart data={trend} goalTotal={proratedGoal} />
+          <TrendChart
+            data={trend}
+            goalTotal={proratedGoal}
+            paceUnitLabel={
+              filters.granularity === "week"
+                ? "wk"
+                : filters.granularity === "month"
+                  ? "mo"
+                  : "qtr"
+            }
+          />
         </div>
       </div>
 

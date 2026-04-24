@@ -5,10 +5,13 @@ import { useTransition } from "react";
 import {
   CALL_CHANNELS,
   DEFAULT_FILTERS,
+  GRANULARITIES,
+  GRANULARITY_LABELS,
   TIME_RANGES,
   TIME_RANGE_LABELS,
   type CallChannel,
   type DashboardFilters,
+  type Granularity,
   type TimeRange,
 } from "./filters";
 
@@ -23,6 +26,8 @@ export default function FilterBar({ filters }: { filters: DashboardFilters }) {
     if (merged.range !== DEFAULT_FILTERS.range) params.set("range", merged.range);
     if (merged.channel !== DEFAULT_FILTERS.channel)
       params.set("channel", merged.channel);
+    if (merged.granularity !== DEFAULT_FILTERS.granularity)
+      params.set("granularity", merged.granularity);
     const qs = params.toString();
     startTransition(() => {
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -30,12 +35,22 @@ export default function FilterBar({ filters }: { filters: DashboardFilters }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
       <Select
         label="Range"
         value={filters.range}
         options={TIME_RANGES.map((r) => ({ value: r, label: TIME_RANGE_LABELS[r] }))}
         onChange={(v) => update({ range: v as TimeRange })}
+        disabled={pending}
+      />
+      <Select
+        label="Granularity"
+        value={filters.granularity}
+        options={GRANULARITIES.map((g) => ({
+          value: g,
+          label: GRANULARITY_LABELS[g],
+        }))}
+        onChange={(v) => update({ granularity: v as Granularity })}
         disabled={pending}
       />
       <Select

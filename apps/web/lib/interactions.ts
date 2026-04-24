@@ -8,9 +8,11 @@ import { queryFabric } from "@/lib/fabric";
 import {
   filterClauses,
   filtersToParams,
-  rangeWeeks,
-  chartWeeks,
+  rangeDates,
+  rangeDays,
+  chartBuckets,
   type DashboardFilters,
+  type Granularity,
 } from "@/app/(app)/dashboard/filters";
 
 export type Scope = {
@@ -77,41 +79,56 @@ export async function loadInteractionKpis(
     return rows[0] ?? emptyKpis();
   }
 
-  const weeks = rangeWeeks(filters.range);
+  // Prior period = same number of days immediately preceding the current
+  // window. Works uniformly for rolling (4w) and snap-to-period (mtd/qtd/ytd)
+  // ranges since both reduce to a (start, end) tuple.
+  const days = rangeDays(filters.range)!;
+  const dates = rangeDates(filters.range)!;
+  const periodStart = dates.start;
+  const periodEnd = dates.end;
+  const priorStart = isoDateMinusDays(periodStart, days);
+  const priorEnd = isoDateMinusDays(periodStart, 1);
+
   // last_call is intentionally computed against the unfiltered scope (all
   // history), not the selected period — see InteractionKpis docstring.
   const rows = await queryFabric<InteractionKpis>(
     tenantId,
-    `WITH bounds AS (
-       SELECT
-         CAST(GETDATE() AS date) AS today,
-         DATEADD(WEEK, -${weeks}, CAST(GETDATE() AS date)) AS period_start,
-         DATEADD(WEEK, -${weeks * 2}, CAST(GETDATE() AS date)) AS prior_start
-     ),
-     all_scope AS (
+    `WITH all_scope AS (
        SELECT MAX(call_date) AS last_call
        FROM gold.fact_call f
-       WHERE f.tenant_id = @tenantId ${extras}
+       WHERE f.tenant_id = @tenantId ${channelFilter} ${accountFilter} ${scopeSql(scope)}
      ),
      window_scope AS (
        SELECT f.call_date, f.hcp_key, f.hco_key, f.owner_user_key
-       FROM gold.fact_call f CROSS JOIN bounds b
+       FROM gold.fact_call f
        WHERE f.tenant_id = @tenantId
-         AND f.call_date >= b.prior_start
-         AND f.call_date <= b.today
-         ${extras}
+         AND f.call_date >= @kpiPriorStart
+         AND f.call_date <= @kpiPeriodEnd
+         ${channelFilter} ${accountFilter} ${scopeSql(scope)}
      )
      SELECT
-       SUM(CASE WHEN w.call_date >= b.period_start AND w.call_date <= b.today THEN 1 ELSE 0 END) AS calls_period,
-       SUM(CASE WHEN w.call_date >= b.prior_start AND w.call_date < b.period_start THEN 1 ELSE 0 END) AS calls_prior,
-       COUNT(DISTINCT CASE WHEN w.call_date >= b.period_start AND w.call_date <= b.today THEN w.hcp_key END) AS hcps,
-       COUNT(DISTINCT CASE WHEN w.call_date >= b.period_start AND w.call_date <= b.today THEN w.hco_key END) AS hcos,
-       COUNT(DISTINCT CASE WHEN w.call_date >= b.period_start AND w.call_date <= b.today THEN w.owner_user_key END) AS reps,
+       SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN 1 ELSE 0 END) AS calls_period,
+       SUM(CASE WHEN w.call_date >= @kpiPriorStart AND w.call_date <= @kpiPriorEnd THEN 1 ELSE 0 END) AS calls_prior,
+       COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hcp_key END) AS hcps,
+       COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hco_key END) AS hcos,
+       COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.owner_user_key END) AS reps,
        CONVERT(varchar(10), MAX(a.last_call), 23) AS last_call
-     FROM window_scope w CROSS JOIN bounds b CROSS JOIN all_scope a`,
-    params,
+     FROM window_scope w CROSS JOIN all_scope a`,
+    {
+      ...params,
+      kpiPeriodStart: periodStart,
+      kpiPeriodEnd: periodEnd,
+      kpiPriorStart: priorStart,
+      kpiPriorEnd: priorEnd,
+    },
   );
   return rows[0] ?? emptyKpis();
+}
+
+function isoDateMinusDays(iso: string, days: number): string {
+  const d = new Date(iso);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 function emptyKpis(): InteractionKpis {
@@ -119,45 +136,101 @@ function emptyKpis(): InteractionKpis {
 }
 
 // ---------------------------------------------------------------------------
-// Weekly trend chart data. Anchored to Monday of the current calendar week
-// (DATEFIRST-independent: 1900-01-01 was a Monday).
+// Trend chart data. Buckets call_date by the filter's granularity:
+//   week    — Monday-anchored, 7-day buckets
+//   month   — calendar month buckets
+//   quarter — calendar quarter buckets
+// Bucket count comes from chartBuckets(filters), capped at 24.
 // ---------------------------------------------------------------------------
 
-export type WeekPoint = { week_start: string; calls: number };
+export type TrendPoint = {
+  bucket_start: string;
+  bucket_label: string;
+  calls: number;
+};
 
-export async function loadWeeklyTrend(
+export async function loadTrend(
   tenantId: string,
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
-): Promise<WeekPoint[]> {
-  const buckets = chartWeeks(filters.range);
+): Promise<TrendPoint[]> {
+  const buckets = chartBuckets(filters);
   const { channelFilter, accountFilter } = filterClauses(filters);
+  const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
   const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
-  return queryFabric<WeekPoint>(
+
+  const rows = await queryFabric<{ bucket_start: string; calls: number }>(
     tenantId,
     `WITH anchor AS (
-       SELECT DATEADD(DAY,
-         -((DATEDIFF(DAY, '1900-01-01', CAST(GETDATE() AS date))) % 7),
-         CAST(GETDATE() AS date)) AS this_week
+       SELECT ${anchorSql} AS this_bucket
      ),
-     weeks AS (
-       SELECT DATEADD(WEEK, -n, a.this_week) AS week_start
+     buckets AS (
+       SELECT DATEADD(${stepUnit}, -n, a.this_bucket) AS bucket_start
        FROM anchor a
        CROSS JOIN (VALUES ${valuesList}) AS w(n)
      )
      SELECT
-       CONVERT(varchar(10), w.week_start, 23) AS week_start,
+       CONVERT(varchar(10), b.bucket_start, 23) AS bucket_start,
        COUNT(f.call_key) AS calls
-     FROM weeks w
+     FROM buckets b
      LEFT JOIN gold.fact_call f
        ON f.tenant_id = @tenantId
-       AND f.call_date >= w.week_start
-       AND f.call_date < DATEADD(WEEK, 1, w.week_start)
+       AND f.call_date >= b.bucket_start
+       AND f.call_date < ${addOneSql}
        ${channelFilter} ${accountFilter} ${scopeSql(scope)}
-     GROUP BY w.week_start
-     ORDER BY w.week_start ASC`,
+     GROUP BY b.bucket_start
+     ORDER BY b.bucket_start ASC`,
     mergeParams(filters, scope),
   );
+
+  return rows.map((r) => ({
+    bucket_start: r.bucket_start,
+    bucket_label: bucketLabel(r.bucket_start, filters.granularity),
+    calls: r.calls,
+  }));
+}
+
+// SQL fragments to generate bucket boundaries per granularity. Anchor is the
+// start of the bucket containing TODAY; we DATEADD(stepUnit, -n) to walk back.
+function bucketSqlFragments(g: Granularity): {
+  anchorSql: string;
+  stepUnit: "WEEK" | "MONTH" | "QUARTER";
+  addOneSql: string;
+} {
+  if (g === "week") {
+    return {
+      // Monday of current week (DATEFIRST-independent: 1900-01-01 was a Monday)
+      anchorSql: `DATEADD(DAY, -((DATEDIFF(DAY, '1900-01-01', CAST(GETDATE() AS date))) % 7), CAST(GETDATE() AS date))`,
+      stepUnit: "WEEK",
+      addOneSql: `DATEADD(WEEK, 1, b.bucket_start)`,
+    };
+  }
+  if (g === "month") {
+    return {
+      anchorSql: `DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1)`,
+      stepUnit: "MONTH",
+      addOneSql: `DATEADD(MONTH, 1, b.bucket_start)`,
+    };
+  }
+  // quarter
+  return {
+    anchorSql: `DATEFROMPARTS(YEAR(GETDATE()), ((MONTH(GETDATE()) - 1) / 3) * 3 + 1, 1)`,
+    stepUnit: "QUARTER",
+    addOneSql: `DATEADD(QUARTER, 1, b.bucket_start)`,
+  };
+}
+
+function bucketLabel(isoBucketStart: string, g: Granularity): string {
+  const d = new Date(isoBucketStart);
+  if (g === "week") {
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+  if (g === "month") {
+    return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  }
+  // quarter
+  const q = Math.floor(d.getUTCMonth() / 3) + 1;
+  return `Q${q} ${String(d.getUTCFullYear()).slice(-2)}`;
 }
 
 // ---------------------------------------------------------------------------

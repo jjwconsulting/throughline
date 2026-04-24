@@ -11,28 +11,28 @@ import {
   YAxis,
 } from "recharts";
 
-type Point = { week_start: string; calls: number };
+type Point = { bucket_start: string; bucket_label: string; calls: number };
 
 export default function TrendChart({
   data,
   goalTotal,
+  paceUnitLabel = "wk",
 }: {
   data: Point[];
   // Optional: total goal value across the displayed window. The chart
   // renders a "Pace" reference line at goalTotal / data.length so each
-  // weekly bar can be compared to its expected share. Pass null/undefined
+  // bucket bar can be compared to its expected share. Pass null/undefined
   // when no goal exists for this window.
   goalTotal?: number | null;
+  // Suffix for the pace label ("wk" / "mo" / "qtr"). Reflects bucket size.
+  paceUnitLabel?: string;
 }) {
   const formatted = data.map((d) => ({
     ...d,
-    label: new Date(d.week_start).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    }),
+    label: d.bucket_label,
   }));
 
-  const weeklyPace =
+  const bucketPace =
     goalTotal != null && goalTotal > 0 && data.length > 0
       ? Math.round(goalTotal / data.length)
       : null;
@@ -78,14 +78,14 @@ export default function TrendChart({
           strokeWidth={2}
           fill="url(#callsFill)"
         />
-        {weeklyPace != null ? (
+        {bucketPace != null ? (
           <ReferenceLine
-            y={weeklyPace}
+            y={bucketPace}
             stroke="var(--color-primary)"
             strokeDasharray="4 4"
             strokeWidth={1.5}
             label={{
-              value: `Pace ${weeklyPace.toLocaleString("en-US")}/wk`,
+              value: `Pace ${bucketPace.toLocaleString("en-US")}/${paceUnitLabel}`,
               position: "insideTopRight",
               fill: "var(--color-primary)",
               fontSize: 11,

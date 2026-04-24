@@ -1,7 +1,7 @@
 import Link from "next/link";
 import {
   loadInteractionKpis,
-  loadWeeklyTrend,
+  loadTrend,
   loadTopReps,
   loadTopHcps,
   loadTopHcos,
@@ -9,9 +9,7 @@ import {
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
 import {
-  sumRepGoalsForPeriod,
-  findGoalContaining,
-  prorateGoalByBusinessDays,
+  loadOverlappingGoalSum,
   attainmentLabel,
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
@@ -19,7 +17,13 @@ import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
 import AccountToggle from "./account-toggle";
 import NoAccess from "./no-access";
-import { parseFilters, chartWeeks, periodLabel, rangeDates } from "./filters";
+import {
+  parseFilters,
+  chartBuckets,
+  periodLabel,
+  rangeDates,
+  GRANULARITY_LABELS,
+} from "./filters";
 
 export const dynamic = "force-dynamic";
 
@@ -54,46 +58,27 @@ export default async function Dashboard({
   // Top accounts: swap HCP table for HCO table when in HCO mode.
   const showHcos = filters.account === "hco";
   // Goal lookup applies only on the calls metric for now, and only when the
-  // filter has a concrete date range (skip "all"). For per-rep scopes, the
-  // goal is the rep's own goal; for admin/manager, sum of goals across
-  // visible reps.
+  // filter has a concrete date range (skip "all"). Sums all overlapping
+  // goal portions for the window — handles 12w spanning Q1+Q2 correctly.
   const dateRange = rangeDates(filters.range);
-  const goalLookup = (async () => {
-    if (!dateRange) return null;
-    if (scope.role === "rep") {
-      const goal = await findGoalContaining({
+  const goalLookup = dateRange
+    ? loadOverlappingGoalSum({
         tenantId,
         metric: "calls",
         entityType: "rep",
-        entityId: scope.userKey,
+        entityFilter:
+          scope.role === "rep"
+            ? { type: "single", id: scope.userKey }
+            : { type: "all" },
         rangeStart: dateRange.start,
         rangeEnd: dateRange.end,
-      });
-      return goal
-        ? prorateGoalByBusinessDays({
-            tenantId,
-            goal,
-            rangeStart: dateRange.start,
-            rangeEnd: dateRange.end,
-          })
-        : null;
-    }
-    // admin / manager / bypass: sum of all (visible) rep goals. Tenant-wide
-    // sum doesn't have a single canonical period to prorate against, so we
-    // sum the unprorated targets for now. Refinement: prorate each goal
-    // individually then sum, when the right semantic becomes obvious.
-    return sumRepGoalsForPeriod({
-      tenantId,
-      metric: "calls",
-      rangeStart: dateRange.start,
-      rangeEnd: dateRange.end,
-    });
-  })();
+      })
+    : Promise.resolve(null);
 
   const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals, periodGoal] =
     await Promise.all([
       loadInteractionKpis(tenantId, filters, rlsScope),
-      loadWeeklyTrend(tenantId, filters, rlsScope),
+      loadTrend(tenantId, filters, rlsScope),
       loadTopReps(tenantId, filters, rlsScope),
       showHcos
         ? Promise.resolve([])
@@ -172,13 +157,26 @@ export default async function Dashboard({
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">Calls per week</h2>
+          <h2 className="font-display text-lg">
+            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+          </h2>
           <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartWeeks(filters.range)} most recent weeks
+            {chartBuckets(filters)} most recent {filters.granularity}
+            {chartBuckets(filters) === 1 ? "" : "s"}
           </p>
         </div>
         <div className="px-2 py-4">
-          <TrendChart data={trend} goalTotal={periodGoal} />
+          <TrendChart
+            data={trend}
+            goalTotal={periodGoal}
+            paceUnitLabel={
+              filters.granularity === "week"
+                ? "wk"
+                : filters.granularity === "month"
+                  ? "mo"
+                  : "qtr"
+            }
+          />
         </div>
       </div>
 
