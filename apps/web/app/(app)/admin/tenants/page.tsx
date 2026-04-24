@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { db } from "@/lib/db";
 import { desc, schema } from "@throughline/db";
 import TenantForm from "./tenant-form";
@@ -17,6 +18,14 @@ export default async function TenantsPage() {
         <p className="text-[var(--color-ink-muted)]">
           Each tenant gets its own bronze schema in Fabric. Shared silver + gold
           filter by tenant_id.
+        </p>
+        <p className="mt-2 text-sm">
+          <Link
+            href="/admin/users"
+            className="text-[var(--color-primary)] hover:underline"
+          >
+            Manage users →
+          </Link>
         </p>
       </div>
 

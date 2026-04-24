@@ -71,9 +71,10 @@ async function getAadToken(env: PbiEnv): Promise<string> {
 async function fetchReportEmbedUrl(
   env: PbiEnv,
   aadToken: string,
+  reportId: string,
 ): Promise<string> {
   const res = await fetch(
-    `${PBI_API}/groups/${env.workspaceId}/reports/${env.reportId}`,
+    `${PBI_API}/groups/${env.workspaceId}/reports/${reportId}`,
     { headers: { Authorization: `Bearer ${aadToken}` } },
   );
   if (!res.ok) {
@@ -98,6 +99,7 @@ async function generateEmbedToken(
   env: PbiEnv,
   aadToken: string,
   tenantId: string | null,
+  reportId: string,
 ): Promise<{ token: string; expiration: string }> {
   const identities = tenantId
     ? [
@@ -120,7 +122,7 @@ async function generateEmbedToken(
     },
     body: JSON.stringify({
       datasets: [{ id: env.datasetId, xmlaPermissions: "ReadOnly" }],
-      reports: [{ id: env.reportId }],
+      reports: [{ id: reportId }],
       targetWorkspaces: [{ id: env.workspaceId }],
       identities,
     }),
@@ -140,17 +142,40 @@ export type EmbedConfig = {
 
 export async function getReportEmbedConfig(
   tenantId: string | null,
+  reportIdOverride?: string,
 ): Promise<EmbedConfig> {
   const env = readEnv();
+  const reportId = reportIdOverride ?? env.reportId;
   const aadToken = await getAadToken(env);
   const [embedUrl, { token, expiration }] = await Promise.all([
-    fetchReportEmbedUrl(env, aadToken),
-    generateEmbedToken(env, aadToken, tenantId),
+    fetchReportEmbedUrl(env, aadToken, reportId),
+    generateEmbedToken(env, aadToken, tenantId, reportId),
   ]);
   return {
-    reportId: env.reportId,
+    reportId,
     embedUrl,
     embedToken: token,
     tokenExpiration: expiration,
   };
+}
+
+// The configured reports available for embedding. v1: just the env-configured
+// one. Later: a config table / per-tenant report registry, surfaced in the
+// reports index.
+export type ReportSummary = {
+  id: string;
+  title: string;
+  description: string;
+};
+
+export function listReports(): ReportSummary[] {
+  const id = process.env.POWERBI_REPORT_ID;
+  if (!id) return [];
+  return [
+    {
+      id,
+      title: "Operations report",
+      description: "The full Power BI canvas — drag fields, build pivots, save views.",
+    },
+  ];
 }

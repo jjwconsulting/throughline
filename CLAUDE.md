@@ -27,18 +27,25 @@ Life-sciences commercial analytics SaaS. JV between JJW Consulting (James Waterm
 - **Do** write tests before porting a fennec notebook — fennec has zero test coverage and that's not surviving into SaaS.
 - **Do** respect tenant-specific hardcoded rules in silver builds with inline comments — they'll move to a config registry when tenant #2 lands (see `docs/architecture/tenant-variability.md`).
 
-## Current status (2026-04-23)
-Everything from bronze through gold is built and tested against fennec's live Veeva data. 22,814 real calls flow through to `gold.fact_call`, joinable to `dim_hcp`/`dim_user`/`dim_date`. Direct Lake semantic model `throughline_direct_lake` contains all four dims plus fact_call with proper RLS roles.
+## Current status (2026-04-24)
+Bronze → silver → gold all built and tested against fennec's live Veeva data. The web app is a real V1 multi-tenant SaaS:
+- Native dashboards (KPIs / trend / top tables / drilldowns to `/reps/[user_key]`, `/hcps/[hcp_key]`, `/hcos/[hco_key]`) backed by `gold.fact_call` joined to `dim_hcp` / `dim_hco` / `dim_user` / `dim_date`
+- AI signals + LLM-narrated `/inbox` (Anthropic API)
+- Per-user RLS (admin / manager / rep / bypass) at the query layer
+- Clerk webhook → `tenant_user` provisioning, with `/admin/users` "Invite from Veeva" flow as the primary onboarding path
+- PBI embed demoted to `/reports/[id]` for deep self-service analysis only
 
-**See README.md "Build state" section** for specifics on what's working end-to-end, what's not yet wired, and the immediate next milestone.
+**See README.md "Build state" section** for specifics + what's not yet wired (most notably: Goals, Sales fact, territory dim).
 
 ## Orientation for new sessions
 Read these in order:
 1. `README.md` (especially "Build state" and "Still open") — what exists, what's planned
 2. `ARCHITECTURE.md` §1, §2, §5 — tenancy model, lakehouse, RLS/embed pattern
 3. `docs/architecture/tenant-variability.md` — why we hardcode per-fennec rules and when to refactor
-4. `docs/product/web-display-philosophy.md` — native-first rendering, PBI as escape hatch
-5. `docs/product/goals.md`, `ai-layer.md`, `user-access.md` — deferred design sketches
+4. `docs/architecture/rls.md` — per-user scope enforcement in the native query path
+5. `docs/architecture/clerk-webhooks.md` — invite + provisioning flow
+6. `docs/product/web-display-philosophy.md` — native-first rendering, PBI as escape hatch
+7. `docs/product/goals.md`, `ai-layer.md`, `user-access.md` — deferred design sketches
 
 ## Open decisions
 See README.md "Still open" section.

@@ -6,7 +6,7 @@ Commercial analytics SaaS for life sciences. A JJW Consulting + Sentero Pharma j
 
 ## What this is
 
-A multi-tenant SaaS that ingests life-sciences commercial data (Veeva Vault + SFTP/email file drops + eventually HubSpot and others), transforms it in **Microsoft Fabric**, and surfaces it through embedded Power BI reports and a Next.js app. The app also hosts user-editable mapping tables, custom groupings, and admin.
+A multi-tenant SaaS that ingests life-sciences commercial data (Veeva Vault + SFTP/email file drops + eventually HubSpot and others), transforms it in **Microsoft Fabric**, and surfaces it through native React dashboards (with embedded Power BI reserved for deep self-service analysis). The app hosts the analytics surfaces, an AI-driven inbox of insight signals, user-editable mapping tables, custom groupings, and admin.
 
 ## Layout
 
@@ -42,29 +42,43 @@ Requires Node 20+ and pnpm 9+.
 - **Power BI embed:** app-owns-data via service principal, **Direct Lake** semantic model with `customData`-based RLS (see ARCHITECTURE.md §5 for the cloud-connection binding setup)
 - **Billing:** Stripe (self-serve tiers); enterprise = annual MSA separate
 
-## Build state (snapshot 2026-04-23)
+## Build state (snapshot 2026-04-24)
 
 ### Working end-to-end against fennec's real Veeva data
 
+**Data plane (Fabric)**
 - **Bronze ingest:** SFTP file drop (CSV → Delta), Veeva Direct Data API (FULL daily + incremental ~15-min batches with cursor-tracked idempotency in `ops.veeva_ingest_log`)
 - **Silver layer (8 entities):** `picklist`, `hcp` (78,668), `hco` (24,938), `user` (91), `territory` (50, with team_role derivation), `call` (22,814), `account_territory` (~225k bridge), `user_territory` (~80 bridge), `account_xref` (synthetic SFTP fixture)
-- **Gold layer (4 tables):** `dim_date` (2020–2030), `dim_hcp`, `dim_user` (with `is_active` + `is_field_user` flags), `fact_call` (with `credit_user_key` COALESCE pattern)
-- **Web app:** Clerk auth, `/admin/tenants` CRUD page, `/dashboard` Power BI embed (Direct Lake + per-user RLS via `customData`)
+- **Gold layer (5 tables):** `dim_date` (2020–2030), `dim_hcp`, `dim_hco` (newly promoted), `dim_user` (with `is_active` + `is_field_user` flags), `fact_call` (with `hcp_key`, `hco_key`, and `credit_user_key` COALESCE pattern)
+- **Direct Lake semantic model:** all 5 gold tables wired with relationships + tenant RLS via `customData`
 - **Config plane:** Postgres → Fabric `config.*` sync notebook keeps the two stores aligned
+
+**Web app (Next.js)**
+- **Native dashboards as default**, PBI embed reserved for deep analysis at `/reports/[id]`. See [docs/product/web-display-philosophy.md](docs/product/web-display-philosophy.md).
+- `/dashboard` — KPI cards (Interactions / HCPs reached / Active reps), trend chart, top reps + top HCPs/HCOs tables, account toggle (HCP/HCO/All), filter bar (range / channel), all RLS-scoped and clickable through to detail pages
+- `/reps/[user_key]`, `/hcps/[hcp_key]`, `/hcos/[hco_key]` — entity detail pages with KPIs, trend, related-entity tables
+- `/inbox` — AI-driven signals view: HCP inactivity, activity drop, over-targeting; LLM-generated priority brief at top via Anthropic API
+- `/admin/users` — invite flow with "Invite from Veeva" primary path (lists active reps from `gold.dim_user` with click-to-invite) + manual escape hatch; provisioned-users audit table
+- `/admin/tenants` — tenant CRUD
+- **RLS:** per-user role + scope (`admin` / `manager` / `rep` / `bypass`), enforced at the query layer in `apps/web/lib/scope.ts`. See [docs/architecture/rls.md](docs/architecture/rls.md).
+- **Auth + provisioning:** Clerk middleware-protected routes; `/api/webhooks/clerk` auto-provisions `tenant_user` rows from invite metadata. See [docs/architecture/clerk-webhooks.md](docs/architecture/clerk-webhooks.md).
 
 ### Not yet wired
 
-- **PBI semantic model still points at the synthetic 7-row dim_account.** Real `gold.fact_call` exists but isn't surfaced in the dashboard yet.
-- `gold.dim_hco`, `gold.dim_territory`, gold-layer bridges — silver bridges work for now; promote when reporting needs it.
+- `gold.dim_territory`, `gold.bridge_user_territory`, `gold.bridge_hcp_territory` — territory rollups blocked here; manager scope falls back to `manager_id` hierarchy.
+- `gold.bridge_hcp_hco` (HCP↔HCO affiliations) — deferred until sales fact lands; the high-value use case ("$$ at this institution via these HCPs") only materializes when both exist.
 - `silver.user_territory_assignment_scd2` for point-in-time rep attribution (current bridge is current-state only).
+- Mislabeled `gold.fact_call.status` column — always "Active" (account-flag carry-through). Use `call_status` for real Veeva status. Cleanup pending next gold rebuild.
+- **Goals** — entire KPI category, no ingest exists. Biggest pharma KPI gap. See [docs/product/goals.md](docs/product/goals.md).
+- **Sales fact** — entire revenue side missing; needs source decision.
 - Production scheduling — every notebook runs manually today.
 - Tenant variability rules registry — hardcoded per-fennec rules with comments marking them; refactor when tenant #2 lands.
-- Invite flow / Clerk webhook → `tenant_user`. Current onboarding is hand-run SQL.
+- `user.deleted` webhook handler for offboarding; Clerk user delete leaves the `tenant_user` row.
 - Tests. Architecture §9.9 calls for them; we have zero.
 
 ### Immediate next milestone
 
-**Repoint the PBI dashboard to `gold.fact_call`** — update the semantic model to use real gold tables, build a "calls per rep / specialty / quarter" report. Once this lights up, the full SaaS loop is demoable with real fennec data.
+**Goals product design** — pick the data shape (file upload vs form-entry vs scheduled sync), then build ingest + dashboard surfaces. Goal-attainment is the #1 pharma KPI per the catalog mining; everything else is incremental.
 
 ## Still open
 

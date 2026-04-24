@@ -43,6 +43,9 @@ importers:
       recharts:
         specifier: ^3.8.1
         version: 3.8.1(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react-is@19.2.5)(react@19.2.5)(redux@5.0.1)
+      svix:
+        specifier: ^1.92.2
+        version: 1.92.2
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.0.0
@@ -1689,6 +1692,9 @@ packages:
       babel-plugin-macros:
         optional: true
 
+  svix@1.92.2:
+    resolution: {integrity: sha512-ZmuA3UVvlnF9EgxlzmPtF7CKjQb64Z6OFlyfdDfU0sdcC7dJa+3aOYX5B9mA+RS6ch1AxBa4UP/l6KmqfGtWBQ==}
+
   swr@2.3.4:
     resolution: {integrity: sha512-bYd2lrhc+VarcpkgWclcUi92wYCpOgMws9Sd1hG1ntAu0NEy+14CbotuFjshBU2kt9rYj9TSmDcybpxpeTU1fg==}
     peerDependencies:
@@ -3078,6 +3084,10 @@ snapshots:
     dependencies:
       client-only: 0.0.1
       react: 19.2.5
+
+  svix@1.92.2:
+    dependencies:
+      standardwebhooks: 1.0.0
 
   swr@2.3.4(react@19.2.5):
     dependencies:

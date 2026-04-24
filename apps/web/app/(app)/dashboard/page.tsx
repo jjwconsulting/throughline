@@ -6,11 +6,9 @@ import {
   loadTopHcps,
   loadTopHcos,
 } from "@/lib/interactions";
-import { getReportEmbedConfig } from "@/lib/powerbi";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
 import SignalsPanel from "@/components/signals-panel";
-import EmbedLoader from "./embed-loader";
 import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
 import AccountToggle from "./account-toggle";
@@ -49,7 +47,7 @@ export default async function Dashboard({
 
   // Top accounts: swap HCP table for HCO table when in HCO mode.
   const showHcos = filters.account === "hco";
-  const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals, embedResult] =
+  const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals] =
     await Promise.all([
       loadInteractionKpis(tenantId, filters, rlsScope),
       loadWeeklyTrend(tenantId, filters, rlsScope),
@@ -64,13 +62,6 @@ export default async function Dashboard({
       // attention right now," regardless of which time window the rest of
       // the dashboard is showing.
       loadHcpInactivitySignals(tenantId, rlsScope),
-      getReportEmbedConfig(tenantId).then(
-        (e) => ({ ok: true as const, embed: e }),
-        (err: unknown) => ({
-          ok: false as const,
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      ),
     ]);
 
   const period = periodLabel(filters.range);
@@ -281,22 +272,15 @@ export default async function Dashboard({
         </div>
       </div>
 
-      {embedResult.ok ? (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-4 overflow-hidden">
-          <EmbedLoader
-            reportId={embedResult.embed.reportId}
-            embedUrl={embedResult.embed.embedUrl}
-            embedToken={embedResult.embed.embedToken}
-          />
-        </div>
-      ) : (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-6">
-          <p className="text-sm font-medium">Power BI report unavailable</p>
-          <p className="text-xs text-[var(--color-ink-muted)] mt-1 font-mono break-all">
-            {embedResult.error}
-          </p>
-        </div>
-      )}
+      <div className="text-center text-xs text-[var(--color-ink-muted)] pt-4">
+        Need deeper analysis?{" "}
+        <Link
+          href="/reports"
+          className="text-[var(--color-primary)] hover:underline"
+        >
+          Open the full Power BI report →
+        </Link>
+      </div>
     </div>
   );
 }
