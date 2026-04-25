@@ -70,14 +70,18 @@ MAPPED_COLUMNS = [
 # yield the same DOUBLE. Bronze stays STRING; silver is typed.
 #
 # {col} is the bronze column reference (already backtick-quoted).
+#
+# `to_date(col, fmt)` returns NULL on parse failure when ANSI mode is off
+# (Fabric default), so COALESCE walks multiple format candidates safely.
+# `try_to_date` would be nicer but isn't available in older Spark runtimes.
 TYPE_CASTS: dict[str, str] = {
     # Try multiple date formats; first non-null wins. Add formats here as
-    # new tenants land. M/d/yyyy is the Fennec/IntegriChain default; date
-    # cells from XLSX come through as ISO-ish.
+    # new tenants land. M/d/yyyy is the Fennec/IntegriChain default; ISO
+    # date cells (XLSX export, modern feeds) hit the second branch.
     "transaction_date":
         "COALESCE("
-        "TRY_TO_DATE({col}, 'M/d/yyyy'), "
-        "TRY_TO_DATE({col}, 'yyyy-MM-dd'), "
+        "to_date({col}, 'M/d/yyyy'), "
+        "to_date({col}, 'yyyy-MM-dd'), "
         "TRY_CAST({col} AS DATE)"
         ")",
     # Strip $ and , then CAST. NULL-safe (TRY_CAST returns NULL on bad input).
