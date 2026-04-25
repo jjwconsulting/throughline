@@ -3,11 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { schema } from "@throughline/db";
 import { db } from "@/lib/db";
+import { queryFabric } from "@/lib/fabric";
 import { getCurrentScope } from "@/lib/scope";
 import {
   narrateRecommendation,
   type GoalRecommendation,
 } from "@/lib/goal-recommendations";
+import { parsePeriodLabel } from "./period";
 
 export type SaveGoalsState = {
   error: string | null;
@@ -175,6 +177,249 @@ export async function narrateRowAction(
     };
   }
   return { narrative, error: null };
+}
+
+// ---------------------------------------------------------------------------
+// CSV upload action.
+//
+// Expected columns:
+//   rep_email, period, goal_calls [, recommended_calls (ignored)]
+//
+// Per-row validation: lookup user_key by email, parse period, coerce value.
+// Each row's outcome is reported back; failed rows don't block successful
+// ones — admin can fix the file and re-upload (idempotent: upserts on the
+// goal unique key).
+// ---------------------------------------------------------------------------
+
+export type UploadGoalsState = {
+  saved: number;
+  rowResults: { line: number; status: "ok" | "error"; message: string }[];
+};
+
+export async function uploadGoalsAction(
+  _prev: UploadGoalsState,
+  formData: FormData,
+): Promise<UploadGoalsState> {
+  const empty: UploadGoalsState = { saved: 0, rowResults: [] };
+
+  const { resolution } = await getCurrentScope();
+  if (
+    !resolution?.ok ||
+    (resolution.scope.role !== "admin" && resolution.scope.role !== "bypass")
+  ) {
+    return {
+      ...empty,
+      rowResults: [{ line: 0, status: "error", message: "Not authorized" }],
+    };
+  }
+  const tenantId = resolution.scope.tenantId;
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return {
+      ...empty,
+      rowResults: [
+        { line: 0, status: "error", message: "No file selected" },
+      ],
+    };
+  }
+  if (file.size > 5_000_000) {
+    return {
+      ...empty,
+      rowResults: [
+        { line: 0, status: "error", message: "File too large (max 5MB)" },
+      ],
+    };
+  }
+
+  const text = await file.text();
+  const rows = parseCsv(text);
+  if (rows.length === 0) {
+    return {
+      ...empty,
+      rowResults: [{ line: 0, status: "error", message: "Empty file" }],
+    };
+  }
+
+  const header = rows[0]!.map((h) => h.toLowerCase().trim());
+  const idx = {
+    email: header.indexOf("rep_email"),
+    period: header.indexOf("period"),
+    goal: header.indexOf("goal_calls"),
+  };
+  if (idx.email < 0 || idx.period < 0 || idx.goal < 0) {
+    return {
+      ...empty,
+      rowResults: [
+        {
+          line: 1,
+          status: "error",
+          message:
+            "Missing required column(s). Expected: rep_email, period, goal_calls.",
+        },
+      ],
+    };
+  }
+
+  // Build email -> user_key map for this tenant in one query.
+  const userRows = await queryFabric<{ user_key: string; email: string | null }>(
+    tenantId,
+    `SELECT user_key, email
+     FROM gold.dim_user
+     WHERE tenant_id = @tenantId
+       AND status = 'Active'
+       AND user_type IN ('Sales', 'Medical')
+       AND email IS NOT NULL`,
+  );
+  const userKeyByEmail = new Map(
+    userRows
+      .filter((u) => u.email)
+      .map((u) => [u.email!.toLowerCase(), u.user_key]),
+  );
+
+  const results: UploadGoalsState["rowResults"] = [];
+  let saved = 0;
+  const createdBy = resolution.scope.role;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i]!;
+    const lineNum = i + 1; // 1-indexed file lines (header is line 1)
+    const email = (row[idx.email] ?? "").trim().toLowerCase();
+    const periodLabel = (row[idx.period] ?? "").trim();
+    const goalRaw = (row[idx.goal] ?? "").trim();
+
+    if (!email && !periodLabel && !goalRaw) continue; // blank row, skip silently
+
+    const userKey = userKeyByEmail.get(email);
+    if (!userKey) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `No active rep found with email "${email}"`,
+      });
+      continue;
+    }
+
+    const range = parsePeriodLabel(periodLabel);
+    if (!range) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `Unrecognized period "${periodLabel}". Use formats like 2026-Q3, 2026-05, or 2026.`,
+      });
+      continue;
+    }
+
+    const goalValue = Number(goalRaw);
+    if (!Number.isFinite(goalValue) || goalValue < 0) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `Invalid goal_calls value "${goalRaw}"`,
+      });
+      continue;
+    }
+
+    try {
+      await db
+        .insert(schema.goal)
+        .values({
+          tenantId,
+          metric: "calls",
+          entityType: "rep",
+          entityId: userKey,
+          periodType: inferPeriodType(periodLabel),
+          periodStart: range.start,
+          periodEnd: range.end,
+          goalValue: String(goalValue),
+          goalUnit: "count",
+          source: "upload",
+          createdBy,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.goal.tenantId,
+            schema.goal.metric,
+            schema.goal.entityType,
+            schema.goal.entityId,
+            schema.goal.periodStart,
+            schema.goal.periodEnd,
+          ],
+          set: {
+            goalValue: String(goalValue),
+            goalUnit: "count",
+            source: "upload",
+            updatedAt: new Date(),
+          },
+        });
+      saved += 1;
+      results.push({
+        line: lineNum,
+        status: "ok",
+        message: `${email} ${periodLabel} = ${goalValue}`,
+      });
+    } catch (err) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `DB error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  if (saved > 0) revalidatePath("/admin/goals");
+  return { saved, rowResults: results };
+}
+
+// Tiny CSV parser. Doesn't handle every Excel quirk (escape rules around
+// embedded quotes inside quoted fields, etc.) but handles the common cases:
+// commas inside quoted fields, BOM, mixed CRLF/LF, leading "# comment"
+// lines that we use in the template's "SKIPPED" rows.
+function parseCsv(text: string): string[][] {
+  const stripBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const lines = stripBom.split(/\r?\n/);
+  const rows: string[][] = [];
+  for (const raw of lines) {
+    if (raw.length === 0) continue;
+    if (raw.startsWith("#")) continue; // comment line
+    rows.push(splitCsvLine(raw));
+  }
+  return rows;
+}
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (inQuotes) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (c === '"') {
+        inQuotes = false;
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+function inferPeriodType(label: string): "month" | "quarter" | "year" | "custom" {
+  if (/Q[1-4]$/i.test(label)) return "quarter";
+  if (/^\d{4}-\d{1,2}$/.test(label)) return "month";
+  if (/^\d{4}$/.test(label)) return "year";
+  return "custom";
 }
 
 function unitForMetric(metric: string): string {

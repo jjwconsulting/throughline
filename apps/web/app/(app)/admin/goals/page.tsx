@@ -10,8 +10,10 @@ import {
 } from "@/lib/goal-recommendations";
 import GoalsForm, { type RepGoalRow } from "./goals-form";
 import PeriodPicker from "./period-picker";
+import CsvSection from "./csv-section";
 import {
   formatPeriodLabel,
+  formatPeriodForCsv,
   nextRangeForPeriodType,
   nextQuarterRange,
   type PeriodType,
@@ -148,6 +150,8 @@ export default async function AdminGoalsPage({
         metric={metric}
         periodLabel={formatPeriodLabel(periodStart, periodEnd)}
       />
+
+      <CsvSection periodLabel={formatPeriodForCsv(periodStart, periodEnd)} />
     </div>
   );
 }

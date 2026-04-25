@@ -15,7 +15,7 @@ export default async function Inbox() {
   const { scope } = resolution;
   const sqlScope = scopeToSql(scope);
 
-  const groups = await loadAllSignals(scope.tenantId, sqlScope);
+  const groups = await loadAllSignals(scope.tenantId, scope, sqlScope);
   const totalSignals = groups.reduce((acc, g) => acc + g.signals.length, 0);
 
   return (

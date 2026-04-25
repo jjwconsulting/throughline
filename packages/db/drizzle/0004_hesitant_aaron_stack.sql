@@ -1,0 +1,1 @@
+ALTER TYPE "public"."silver_table" ADD VALUE 'sale';

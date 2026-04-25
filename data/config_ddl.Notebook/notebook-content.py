@@ -123,6 +123,23 @@ CREATE TABLE IF NOT EXISTS {SCHEMA}.tenant_sftp (
 """)
 
 # %%
+# tenant_sftp_feed — per-feed cadence (full_snapshot vs incremental).
+# Drives silver build's batch-selection: snapshot feeds read latest file
+# only; incremental feeds accumulate all batches.
+spark.sql(f"""
+CREATE TABLE IF NOT EXISTS {SCHEMA}.tenant_sftp_feed (
+  tenant_id     STRING    NOT NULL,
+  feed_name     STRING    NOT NULL,
+  feed_type     STRING    NOT NULL,
+  silver_table  STRING    NOT NULL,
+  notes         STRING,
+  enabled       BOOLEAN   NOT NULL,
+  updated_by    STRING    NOT NULL,
+  updated_at    TIMESTAMP NOT NULL
+) USING DELTA
+""")
+
+# %%
 # tenant_email_drop — per-tenant email ingestion feeds (1:N)
 spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {SCHEMA}.tenant_email_drop (

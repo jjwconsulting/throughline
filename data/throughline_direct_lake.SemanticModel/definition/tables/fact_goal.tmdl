@@ -1,0 +1,169 @@
+table fact_goal
+	lineageTag: 63c2ec43-a262-4df0-9fd9-374282d9b28e
+	sourceLineageTag: [gold].[fact_goal]
+
+	column goal_id
+		dataType: string
+		lineageTag: decf305a-0084-4efc-85b6-6f3f0da42269
+		sourceLineageTag: goal_id
+		summarizeBy: none
+		sourceColumn: goal_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: c44874c1-7ccf-4645-88d2-f3ecfe2ab640
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column metric
+		dataType: string
+		lineageTag: 9530fe3a-ba33-433d-a56a-99e4fe0b158f
+		sourceLineageTag: metric
+		summarizeBy: none
+		sourceColumn: metric
+
+		annotation SummarizationSetBy = Automatic
+
+	column entity_type
+		dataType: string
+		lineageTag: 3a082474-57c6-4814-aa32-8525fb83652d
+		sourceLineageTag: entity_type
+		summarizeBy: none
+		sourceColumn: entity_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column entity_id
+		dataType: string
+		lineageTag: 080a2f0d-9108-4e5f-8c97-b05fc615c809
+		sourceLineageTag: entity_id
+		summarizeBy: none
+		sourceColumn: entity_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column period_type
+		dataType: string
+		lineageTag: 832f3c50-2396-4b96-9921-905d33eb0473
+		sourceLineageTag: period_type
+		summarizeBy: none
+		sourceColumn: period_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column period_start
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: a61c55ef-ebc1-4b6c-be4d-b6f0ce97ada8
+		sourceLineageTag: period_start
+		summarizeBy: none
+		sourceColumn: period_start
+
+		annotation SummarizationSetBy = Automatic
+
+	column period_end
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 33c10921-a20b-416d-8894-1ba16d657d62
+		sourceLineageTag: period_end
+		summarizeBy: none
+		sourceColumn: period_end
+
+		annotation SummarizationSetBy = Automatic
+
+	column goal_value
+		dataType: double
+		lineageTag: d06f8ef2-014c-4a82-97e9-11d64a8dccf8
+		sourceLineageTag: goal_value
+		summarizeBy: sum
+		sourceColumn: goal_value
+
+		annotation SummarizationSetBy = Automatic
+
+	column goal_unit
+		dataType: string
+		lineageTag: 20a09650-7085-4c7d-9a4f-f27d2ce30563
+		sourceLineageTag: goal_unit
+		summarizeBy: none
+		sourceColumn: goal_unit
+
+		annotation SummarizationSetBy = Automatic
+
+	column source
+		dataType: string
+		lineageTag: 7a2d262c-f30a-42c0-be59-7b122584b281
+		sourceLineageTag: source
+		summarizeBy: none
+		sourceColumn: source
+
+		annotation SummarizationSetBy = Automatic
+
+	column year
+		dataType: int64
+		formatString: 0
+		lineageTag: 20874c60-b2c8-406b-9018-d8ba54975c38
+		sourceLineageTag: year
+		summarizeBy: none
+		sourceColumn: year
+
+		annotation SummarizationSetBy = Automatic
+
+	column quarter
+		dataType: int64
+		formatString: 0
+		lineageTag: b958aff0-0451-48e4-9a22-36c8e7ed1aa7
+		sourceLineageTag: quarter
+		summarizeBy: none
+		sourceColumn: quarter
+
+		annotation SummarizationSetBy = Automatic
+
+	column month
+		dataType: int64
+		formatString: 0
+		lineageTag: 4c2dc359-665d-4f60-8377-34d319dd6516
+		sourceLineageTag: month
+		summarizeBy: none
+		sourceColumn: month
+
+		annotation SummarizationSetBy = Automatic
+
+	column year_quarter
+		dataType: string
+		lineageTag: fa5815e3-dfcf-4a9e-9884-644b5f7d1140
+		sourceLineageTag: year_quarter
+		summarizeBy: none
+		sourceColumn: year_quarter
+
+		annotation SummarizationSetBy = Automatic
+
+	column year_month
+		dataType: string
+		lineageTag: 66336979-2fda-46f2-996c-eebb8bacc34a
+		sourceLineageTag: year_month
+		summarizeBy: none
+		sourceColumn: year_month
+
+		annotation SummarizationSetBy = Automatic
+
+	column period_days
+		dataType: int64
+		formatString: 0
+		lineageTag: 939219fd-97d3-4f78-a85a-26f7d6156e63
+		sourceLineageTag: period_days
+		summarizeBy: none
+		sourceColumn: period_days
+
+		annotation SummarizationSetBy = Automatic
+
+	partition fact_goal = entity
+		mode: directLake
+		source
+			entityName: fact_goal
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

@@ -29,6 +29,20 @@
       "when": 1777029169135,
       "tag": "0003_clever_toad_men",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777109496031,
+      "tag": "0004_hesitant_aaron_stack",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1777110146992,
+      "tag": "0005_lumpy_xorn",
+      "breakpoints": true
     }
   ]
 }

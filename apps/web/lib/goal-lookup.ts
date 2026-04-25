@@ -1,10 +1,12 @@
-// Goal lookups for dashboard / detail pages. Goals live canonically in
-// Postgres (admin-edited via /admin/goals); analytics live in Fabric. Until
-// a goals_sync notebook mirrors goals into gold.fact_goal, the web layer
-// queries Postgres separately and joins in JS.
+// Goal lookups for dashboard / detail pages.
 //
-// Once gold.fact_goal lands, replace these helpers with native SQL JOINs in
-// the interactions queries — same call sites, faster path.
+// Postgres is the AUTHORITATIVE source for goals — admins write here via
+// /admin/goals (form, CSV upload, recommendation acceptance). Reads happen
+// here too so what an admin saves is reflected immediately, no sync lag.
+//
+// `gold.fact_goal` in Fabric is a downstream batch mirror (built by the
+// goals_sync notebook) used only for PBI native measures and future
+// SQL-side sales-vs-goal joins. It is NOT read by these helpers.
 
 import { and, eq, gte, lte, schema } from "@throughline/db";
 import { db } from "@/lib/db";
@@ -22,6 +24,10 @@ export type GoalEntityType =
   | "tier"
   | "tenant_wide";
 
+export type GoalEntityFilter =
+  | { type: "all" }
+  | { type: "single"; id: string };
+
 // ---------------------------------------------------------------------------
 // Sum of overlapping goal portions for a given range.
 //
@@ -29,24 +35,7 @@ export type GoalEntityType =
 //   overlap_days = max(0, min(period_end, rangeEnd) - max(period_start, rangeStart) + 1)
 //   contribution = goal_value * overlap_days / period_days
 // Returns the sum, or null if no goals overlap.
-//
-// This is the right semantic for chart display: a 12-week window spanning
-// Q1+Q2 picks up BOTH the Q1 goal (prorated to its overlap) and the Q2 goal
-// (prorated to its overlap), summed.
-//
-// `entityFilter`:
-//   - { type: "all" }          — sum across all entities of entityType (e.g.
-//                                 every rep) for tenant-wide attainment math
-//   - { type: "single", id }   — only this entity's goal
-//
-// Calendar-day proration. Business-day adjustment can be layered on top by
-// the caller via a single `gold.dim_date` query, but for v1 calendar is the
-// default — easier to reason about and avoids per-page Fabric round trips.
 // ---------------------------------------------------------------------------
-
-export type GoalEntityFilter =
-  | { type: "all" }
-  | { type: "single"; id: string };
 
 export async function loadOverlappingGoalSum(args: {
   tenantId: string;
@@ -60,8 +49,6 @@ export async function loadOverlappingGoalSum(args: {
     eq(schema.goal.tenantId, args.tenantId),
     eq(schema.goal.metric, args.metric),
     eq(schema.goal.entityType, args.entityType),
-    // Overlap test: period_start <= rangeEnd AND period_end >= rangeStart.
-    // (i.e., the periods are not strictly disjoint.)
     lte(schema.goal.periodStart, args.rangeEnd),
     gte(schema.goal.periodEnd, args.rangeStart),
   ];
@@ -88,7 +75,7 @@ export async function loadOverlappingGoalSum(args: {
     const periodEndMs = new Date(row.periodEnd).getTime();
     const overlapStartMs = Math.max(periodStartMs, rangeStartMs);
     const overlapEndMs = Math.min(periodEndMs, rangeEndMs);
-    if (overlapEndMs < overlapStartMs) continue; // shouldn't happen given WHERE, but defensive
+    if (overlapEndMs < overlapStartMs) continue;
     const overlapDays = msToDays(overlapEndMs - overlapStartMs) + 1;
     const periodDays = msToDays(periodEndMs - periodStartMs) + 1;
     if (periodDays <= 0) continue;

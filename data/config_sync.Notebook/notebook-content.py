@@ -100,6 +100,14 @@ TABLE_QUERIES = {
                host, username, key_secret_uri, base_path, enabled, updated_at
         FROM public.tenant_sftp
     """,
+    "tenant_sftp_feed": """
+        SELECT tenant_id::text AS tenant_id,
+               feed_name,
+               feed_type::text AS feed_type,
+               silver_table::text AS silver_table,
+               notes, enabled, updated_by, updated_at
+        FROM public.tenant_sftp_feed
+    """,
     "tenant_email_drop": """
         SELECT id::text AS id, tenant_id::text AS tenant_id,
                feed_name, source_address, subject_pattern, enabled, updated_at

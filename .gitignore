@@ -11,3 +11,6 @@ dist
 coverage
 *.tsbuildinfo
 test-data/
+
+# Sample data extracts from prior client engagements — never commit
+samples/

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "goals_sync"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "ae60413e-3cd6-4e93-b574-b21ec16cb3ee"
+  }
+}

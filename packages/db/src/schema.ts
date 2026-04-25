@@ -33,6 +33,7 @@ export const silverTableEnum = pgEnum("silver_table", [
   "call",
   "user",
   "account_xref",
+  "sale",
 ]);
 
 export const mappingKindEnum = pgEnum("mapping_kind", [
@@ -48,6 +49,19 @@ export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
   "manager",
   "rep",
   "bypass",
+]);
+
+// SFTP feed cadence model. Drives the silver build's batch-selection logic:
+//   full_snapshot — each new file is a complete snapshot (e.g. IntegriChain
+//                   867 inception-to-date). Silver reads only rows from the
+//                   latest source_file. Bronze can grow but never fills
+//                   silver with duplicates.
+//   incremental   — each new file is a delta (e.g. TriSalus daily extract).
+//                   Silver reads all rows across all files; dedup by natural
+//                   key happens upstream in source.
+export const sftpFeedTypeEnum = pgEnum("sftp_feed_type", [
+  "full_snapshot",
+  "incremental",
 ]);
 
 // Goal taxonomy. Open enums so we can extend without migrations as new
@@ -167,6 +181,38 @@ export const tenantVeeva = pgTable("tenant_veeva", {
     .notNull()
     .defaultNow(),
 });
+
+// Per-feed metadata for SFTP drops. Different feeds under the same tenant
+// can have different cadence (full snapshot vs incremental) and route to
+// different silver tables. The bronze table name is always
+// `bronze_<tenant_slug>.sftp_<feed_name>` (assembled by sftp_ingest).
+export const tenantSftpFeed = pgTable(
+  "tenant_sftp_feed",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    // The feed_name folder under Files/sftp/<tenant_slug>/<feed_name>/.
+    feedName: text("feed_name").notNull(),
+    feedType: sftpFeedTypeEnum("feed_type").notNull(),
+    // Which silver table this feed populates. Drives which silver build
+    // notebook should pick it up.
+    silverTable: silverTableEnum("silver_table").notNull(),
+    notes: text("notes"),
+    enabled: boolean("enabled").notNull().default(true),
+    updatedBy: text("updated_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.feedName] }),
+    feedNameFormat: check(
+      "tenant_sftp_feed_feed_name_format",
+      sql`${t.feedName} ~ '^[a-z][a-z0-9_]*$'`,
+    ),
+  }),
+);
 
 export const tenantSftp = pgTable("tenant_sftp", {
   tenantId: uuid("tenant_id")
