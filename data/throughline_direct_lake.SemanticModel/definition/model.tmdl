@@ -50,9 +50,6 @@ relationship 0b49bd35-5101-4b4a-91bd-117e2ced4fcb
 	fromColumn: fact_call.call_date_key
 	toColumn: dim_date.date_key
 
-// Goal entity_id IS the dim_user.user_key when entity_type='rep'. Direct
-// joinable for rep-level goals; HCO/territory goals will get their own
-// relationships when those dims promote to gold.
 relationship 17af27cf-899e-4f86-9a9d-0ad1e58e0da4
 	fromColumn: fact_goal.entity_id
 	toColumn: dim_user.user_key
