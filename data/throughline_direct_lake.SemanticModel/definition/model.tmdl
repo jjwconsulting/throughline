@@ -21,6 +21,7 @@ ref table dim_hco
 ref table dim_user
 ref table fact_call
 ref table fact_goal
+ref table fact_sale
 
 ref role DefaultUser
 
@@ -53,4 +54,17 @@ relationship 0b49bd35-5101-4b4a-91bd-117e2ced4fcb
 relationship 17af27cf-899e-4f86-9a9d-0ad1e58e0da4
 	fromColumn: fact_goal.entity_id
 	toColumn: dim_user.user_key
+
+relationship f6af1167-fdf2-49aa-80c2-47e0f79d8122
+	fromColumn: fact_sale.transaction_date_key
+	toColumn: dim_date.date_key
+
+relationship ad7da81c-7495-4810-a806-9a101222f66e
+	fromColumn: fact_sale.account_key
+	toColumn: dim_hcp.hcp_key
+
+relationship ba9fae25-ea3d-43b7-9e79-f5d901ef31c2
+	isActive: false
+	fromColumn: fact_sale.account_key
+	toColumn: dim_hco.hco_key
 

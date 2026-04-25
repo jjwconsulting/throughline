@@ -1,0 +1,237 @@
+table fact_sale
+	lineageTag: b318400e-4e96-46e0-9321-023f357efc9e
+	sourceLineageTag: [gold].[fact_sale]
+
+	column sale_key
+		dataType: string
+		lineageTag: e0afb948-553a-4867-8c6f-6b5cdfaa56d5
+		sourceLineageTag: sale_key
+		summarizeBy: none
+		sourceColumn: sale_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column tenant_id
+		dataType: string
+		lineageTag: 5ba6af8a-a4d3-410f-b248-80d78bcfb482
+		sourceLineageTag: tenant_id
+		summarizeBy: none
+		sourceColumn: tenant_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column source_system
+		dataType: string
+		lineageTag: bb232ab4-24fe-482a-a03c-268673fb5e82
+		sourceLineageTag: source_system
+		summarizeBy: none
+		sourceColumn: source_system
+
+		annotation SummarizationSetBy = Automatic
+
+	column transaction_date_key
+		dataType: int64
+		formatString: 0
+		lineageTag: 360b5ca2-906a-4200-83b2-7c4f6de197e9
+		sourceLineageTag: transaction_date_key
+		summarizeBy: none
+		sourceColumn: transaction_date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column transaction_date
+		dataType: dateTime
+		formatString: Short Date
+		lineageTag: 5dbf9e65-24d2-44be-88bf-4c2c7d199c7c
+		sourceLineageTag: transaction_date
+		summarizeBy: none
+		sourceColumn: transaction_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column transaction_type
+		dataType: string
+		lineageTag: 58b482b5-a286-4168-8221-68471b958fc8
+		sourceLineageTag: transaction_type
+		summarizeBy: none
+		sourceColumn: transaction_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column distributor_account_id
+		dataType: string
+		lineageTag: c905f82a-b605-4b1c-a5bd-8f1fd49efae0
+		sourceLineageTag: distributor_account_id
+		summarizeBy: none
+		sourceColumn: distributor_account_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column distributor_account_name
+		dataType: string
+		lineageTag: 0bf8a950-4408-4dfe-a947-1e9463119e8a
+		sourceLineageTag: distributor_account_name
+		summarizeBy: none
+		sourceColumn: distributor_account_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_key
+		dataType: string
+		lineageTag: 5f08ee74-1df8-45e9-8d81-b78588a035ab
+		sourceLineageTag: account_key
+		summarizeBy: none
+		sourceColumn: account_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_type
+		dataType: string
+		lineageTag: 9416d9f8-4c6f-47d9-b96d-2bb960f488bd
+		sourceLineageTag: account_type
+		summarizeBy: none
+		sourceColumn: account_type
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_state
+		dataType: string
+		lineageTag: 0b013150-ec77-4a4a-98b3-b5b71ecfb93d
+		sourceLineageTag: account_state
+		summarizeBy: none
+		sourceColumn: account_state
+
+		annotation SummarizationSetBy = Automatic
+
+	column account_city
+		dataType: string
+		lineageTag: db64218a-b914-494b-a035-e55243d1f02d
+		sourceLineageTag: account_city
+		summarizeBy: none
+		sourceColumn: account_city
+
+		annotation SummarizationSetBy = Automatic
+
+	column channel
+		dataType: string
+		lineageTag: 4cc6b928-e016-47bc-a963-0f4df62ebeeb
+		sourceLineageTag: channel
+		summarizeBy: none
+		sourceColumn: channel
+
+		annotation SummarizationSetBy = Automatic
+
+	column class_of_trade
+		dataType: string
+		lineageTag: 7cd6b07e-4ae9-4a0d-a413-fee98269b75d
+		sourceLineageTag: class_of_trade
+		summarizeBy: none
+		sourceColumn: class_of_trade
+
+		annotation SummarizationSetBy = Automatic
+
+	column business_unit
+		dataType: string
+		lineageTag: 8bc5b02a-4f32-476f-8892-5eefb34a6eae
+		sourceLineageTag: business_unit
+		summarizeBy: none
+		sourceColumn: business_unit
+
+		annotation SummarizationSetBy = Automatic
+
+	column brand
+		dataType: string
+		lineageTag: f7d61404-df6e-4d4a-98da-1b51e7da5e3a
+		sourceLineageTag: brand
+		summarizeBy: none
+		sourceColumn: brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_ndc
+		dataType: string
+		lineageTag: cb4731e7-8003-4672-9b2a-b77e3de23414
+		sourceLineageTag: product_ndc
+		summarizeBy: none
+		sourceColumn: product_ndc
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_name
+		dataType: string
+		lineageTag: 85e8d8b0-683f-4edd-9768-ba51ef85d29d
+		sourceLineageTag: product_name
+		summarizeBy: none
+		sourceColumn: product_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column units
+		dataType: double
+		lineageTag: 1c372a1e-443a-4cd6-b5ce-97eb5a7bae31
+		sourceLineageTag: units
+		summarizeBy: sum
+		sourceColumn: units
+
+		annotation SummarizationSetBy = Automatic
+
+	column net_dollars
+		dataType: double
+		lineageTag: 091881f6-6c68-4ab7-bd06-f0367d9597bc
+		sourceLineageTag: net_dollars
+		summarizeBy: sum
+		sourceColumn: net_dollars
+
+		annotation SummarizationSetBy = Automatic
+
+	column gross_dollars
+		dataType: double
+		lineageTag: 8fa7a4c2-443d-43a6-bdb3-5eefd8906156
+		sourceLineageTag: gross_dollars
+		summarizeBy: sum
+		sourceColumn: gross_dollars
+
+		annotation SummarizationSetBy = Automatic
+
+	column signed_units
+		dataType: double
+		lineageTag: 5429f7fe-9125-4221-9b1a-7a0aa427a975
+		sourceLineageTag: signed_units
+		summarizeBy: sum
+		sourceColumn: signed_units
+
+		annotation SummarizationSetBy = Automatic
+
+	column signed_net_dollars
+		dataType: double
+		lineageTag: d7481c05-cf57-46b1-a6c1-bdb626f6a692
+		sourceLineageTag: signed_net_dollars
+		summarizeBy: sum
+		sourceColumn: signed_net_dollars
+
+		annotation SummarizationSetBy = Automatic
+
+	column signed_gross_dollars
+		dataType: double
+		lineageTag: e0459af6-9c4a-44f0-b785-4f57652857b3
+		sourceLineageTag: signed_gross_dollars
+		summarizeBy: sum
+		sourceColumn: signed_gross_dollars
+
+		annotation SummarizationSetBy = Automatic
+
+	column invoice_number
+		dataType: string
+		lineageTag: 13fdbf7a-3c6d-4b4c-8af7-bb80e76eaad3
+		sourceLineageTag: invoice_number
+		summarizeBy: none
+		sourceColumn: invoice_number
+
+		annotation SummarizationSetBy = Automatic
+
+	partition fact_sale = entity
+		mode: directLake
+		source
+			entityName: fact_sale
+			schemaName: gold
+			expressionSource: 'DirectLake - throughline_lakehouse'

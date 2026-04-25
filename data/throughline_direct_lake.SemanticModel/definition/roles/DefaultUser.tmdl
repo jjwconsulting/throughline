@@ -13,5 +13,7 @@ role DefaultUser
 
 	tablePermission fact_goal = [tenant_id] = CUSTOMDATA()
 
+	tablePermission fact_sale = [tenant_id] = CUSTOMDATA()
+
 	annotation PBI_Id = 9a39a5f3a19946eeba4fcd2e15ccc287
 
