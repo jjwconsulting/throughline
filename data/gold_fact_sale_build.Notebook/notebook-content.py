@@ -166,10 +166,16 @@ SELECT
   s.units_packs,
   s.net_dollars,
   s.gross_dollars,
-  -- Signed measures: RETURNS negate, SALES pass through. NULL stays NULL.
-  CASE WHEN s.transaction_type = 'RETURNS' THEN -s.units         ELSE s.units         END AS signed_units,
-  CASE WHEN s.transaction_type = 'RETURNS' THEN -s.net_dollars   ELSE s.net_dollars   END AS signed_net_dollars,
-  CASE WHEN s.transaction_type = 'RETURNS' THEN -s.gross_dollars ELSE s.gross_dollars END AS signed_gross_dollars,
+  -- Signed measures normalize for net-math: RETURNS always negative,
+  -- SALES always positive. Uses -ABS / ABS so it works regardless of the
+  -- source's own sign convention:
+  --   IntegriChain pre-signs returns as negative in the EDI 867 (standard)
+  --   Some other systems send positive units + a RETURNS type label
+  -- Both cases: signed_units for a RETURNS row ends up negative. SUM()
+  -- over all rows = net (sales - returns). NULL stays NULL.
+  CASE WHEN s.transaction_type = 'RETURNS' THEN -ABS(s.units)         ELSE ABS(s.units)         END AS signed_units,
+  CASE WHEN s.transaction_type = 'RETURNS' THEN -ABS(s.net_dollars)   ELSE ABS(s.net_dollars)   END AS signed_net_dollars,
+  CASE WHEN s.transaction_type = 'RETURNS' THEN -ABS(s.gross_dollars) ELSE ABS(s.gross_dollars) END AS signed_gross_dollars,
   s.invoice_number,
   current_timestamp() AS gold_built_at
 FROM silver.sale s
