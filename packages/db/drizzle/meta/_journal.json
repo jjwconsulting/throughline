@@ -43,6 +43,13 @@
       "when": 1777110146992,
       "tag": "0005_lumpy_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777116027001,
+      "tag": "0006_productive_maestro",
+      "breakpoints": true
     }
   ]
 }

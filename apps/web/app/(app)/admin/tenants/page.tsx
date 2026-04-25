@@ -32,6 +32,12 @@ export default async function TenantsPage() {
           >
             Goals →
           </Link>
+          <Link
+            href="/admin/mappings"
+            className="text-[var(--color-primary)] hover:underline"
+          >
+            Mappings →
+          </Link>
         </p>
       </div>
 

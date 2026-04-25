@@ -117,10 +117,9 @@ for (tid, slug, src, bt), cols in groups.items():
     print(f"  [{slug}] {src} -> {bt}: {len(cols)} cols")
 
 if not groups:
-    raise RuntimeError(
-        f"No field-map rows found for silver_table='{ENTITY}'. "
-        "Seed config.tenant_source_field_map and re-run the config_sync notebook."
-    )
+    # No CSV-bronze field-map rows — that's fine. Build will still source
+    # rows from config.mapping (UI-edited account_xref entries) below.
+    print("(no bronze field-map rows; building from UI mappings only)")
 
 # %%
 # SQL generation. Each group produces:
@@ -186,8 +185,56 @@ print(union_sql)
 print("\n=== End of SQL ===\n")
 
 # %%
-# Execute: overwrite silver.account_xref with the unioned result.
-result_df = spark.sql(union_sql)
+# UI-edited mappings from Postgres `mapping` table (kind='account_xref'),
+# mirrored to Fabric by config_sync. Same column order as the bronze
+# branch (tenant_id, id, source_system, source_key, attrs..., silver_built_at).
+ui_mapping_sql = """
+SELECT
+  tenant_id,
+  uuid() AS id,
+  'ui_mapping' AS source_system,
+  source_key,
+  target_value AS veeva_account_id,
+  CAST(NULL AS STRING) AS channel,
+  CAST(NULL AS STRING) AS dea,
+  CAST(NULL AS STRING) AS name,
+  CAST(NULL AS STRING) AS city,
+  CAST(NULL AS STRING) AS state,
+  CAST(NULL AS STRING) AS postal_code,
+  current_timestamp() AS silver_built_at
+FROM config.mapping
+WHERE kind = 'account_xref'
+"""
+
+# Combine bronze (CSV import) sources + UI-edited mappings. Wrap each in
+# SELECT * with a _priority column so UNION ALL emits matching schemas.
+# UI = priority 1 (wins), bronze = priority 2.
+union_parts = [
+    f"SELECT *, 2 AS _priority FROM ({s})" for s in per_group_sql
+] + [f"SELECT *, 1 AS _priority FROM ({ui_mapping_sql})"]
+
+combined_sql = f"""
+WITH all_sources AS (
+  {' UNION ALL '.join(union_parts)}
+),
+ranked AS (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY tenant_id, source_key
+      ORDER BY _priority ASC, silver_built_at DESC
+    ) AS rn
+  FROM all_sources
+)
+SELECT
+  tenant_id, id, source_system, source_key, veeva_account_id,
+  channel, dea, name, city, state, postal_code, silver_built_at
+FROM ranked
+WHERE rn = 1
+"""
+
+# %%
+# Execute: overwrite silver.account_xref with the unioned + deduped result.
+result_df = spark.sql(combined_sql)
 row_count = result_df.count()
 
 (

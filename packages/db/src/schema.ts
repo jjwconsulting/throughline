@@ -42,6 +42,7 @@ export const mappingKindEnum = pgEnum("mapping_kind", [
   "hco_channel",
   "customer_type",
   "custom_grouping",
+  "account_xref",
 ]);
 
 export const tenantUserRoleEnum = pgEnum("tenant_user_role", [

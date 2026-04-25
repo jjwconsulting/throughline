@@ -1,0 +1,1 @@
+ALTER TYPE "public"."mapping_kind" ADD VALUE 'account_xref';
