@@ -56,6 +56,23 @@ DRY_RUN = False
 TENANT_SLUGS: list[str] = []  # empty = all active tenants
 SFTP_ROOT = "Files/sftp"
 
+# Some source files use column names that Delta rejects by default —
+# spaces, parens, slashes, etc. (e.g. IntegriChain 867 has columns like
+# `Ship-From DEA/HIN/Customer Id` and `sum(867 Qty Sold (EU))`). Enable
+# Delta column mapping at session level so any bronze table created here
+# preserves the source-style names verbatim. Existing tables created
+# before this change keep their original (sanitized-or-broken) shape; if
+# any need to be rebuilt, drop them first.
+spark.conf.set(
+    "spark.databricks.delta.properties.defaults.columnMapping.mode", "name"
+)
+spark.conf.set(
+    "spark.databricks.delta.properties.defaults.minReaderVersion", "2"
+)
+spark.conf.set(
+    "spark.databricks.delta.properties.defaults.minWriterVersion", "5"
+)
+
 # %%
 import uuid
 from datetime import datetime, timezone
