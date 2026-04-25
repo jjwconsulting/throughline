@@ -42,43 +42,47 @@ Requires Node 20+ and pnpm 9+.
 - **Power BI embed:** app-owns-data via service principal, **Direct Lake** semantic model with `customData`-based RLS (see ARCHITECTURE.md §5 for the cloud-connection binding setup)
 - **Billing:** Stripe (self-serve tiers); enterprise = annual MSA separate
 
-## Build state (snapshot 2026-04-24)
+## Build state (snapshot 2026-04-25)
 
-### Working end-to-end against fennec's real Veeva data
+### Working end-to-end against fennec's real Veeva + sales data
 
 **Data plane (Fabric)**
-- **Bronze ingest:** SFTP file drop (CSV → Delta), Veeva Direct Data API (FULL daily + incremental ~15-min batches with cursor-tracked idempotency in `ops.veeva_ingest_log`)
-- **Silver layer (8 entities):** `picklist`, `hcp` (78,668), `hco` (24,938), `user` (91), `territory` (50, with team_role derivation), `call` (22,814), `account_territory` (~225k bridge), `user_territory` (~80 bridge), `account_xref` (synthetic SFTP fixture)
-- **Gold layer (5 tables):** `dim_date` (2020–2030), `dim_hcp`, `dim_hco` (newly promoted), `dim_user` (with `is_active` + `is_field_user` flags), `fact_call` (with `hcp_key`, `hco_key`, and `credit_user_key` COALESCE pattern)
-- **Direct Lake semantic model:** all 5 gold tables wired with relationships + tenant RLS via `customData`
-- **Config plane:** Postgres → Fabric `config.*` sync notebook keeps the two stores aligned
+- **Bronze ingest:** SFTP file drop (CSV → Delta with column-mapping enabled for non-standard column names like `sum(867 Qty Sold (EU))`); Veeva Direct Data API (FULL daily + incremental ~15-min batches with cursor-tracked idempotency in `ops.veeva_ingest_log`)
+- **Silver layer (9 entities):** `picklist`, `hcp` (78k), `hco` (25k), `user` (91), `territory` (50, with team_role derivation), `call` (22.8k), `account_territory` (225k bridge), `user_territory` (80 bridge), `account_xref` (now sourced from CSV bronze + Postgres UI mappings, deduped UI-wins), `sale` (1k+ from IntegriChain 867; daily grain; type-safe casts; snapshot vs incremental cadence per `tenant_sftp_feed`)
+- **Gold layer (7 tables):** `dim_date` (rich: business days, US holidays, relative day/week/quarter), `dim_hcp`, `dim_hco`, `dim_user`, `fact_call`, `fact_goal` (mirror of Postgres goals via `goals_sync` notebook), `fact_sale` (account resolved via account_xref → dim_hcp/dim_hco; signed measures for net math; transfers filtered)
+- **Direct Lake semantic model:** all gold tables wired with relationships + tenant RLS via `customData`
+- **Config plane:** Postgres → Fabric `config.*` sync covers tenant, mappings, field maps, sftp feed cadence, sftp/email/veeva integration metadata, tenant_user
 
 **Web app (Next.js)**
 - **Native dashboards as default**, PBI embed reserved for deep analysis at `/reports/[id]`. See [docs/product/web-display-philosophy.md](docs/product/web-display-philosophy.md).
-- `/dashboard` — KPI cards (Interactions / HCPs reached / Active reps), trend chart, top reps + top HCPs/HCOs tables, account toggle (HCP/HCO/All), filter bar (range / channel), all RLS-scoped and clickable through to detail pages
-- `/reps/[user_key]`, `/hcps/[hcp_key]`, `/hcos/[hco_key]` — entity detail pages with KPIs, trend, related-entity tables
-- `/inbox` — AI-driven signals view: HCP inactivity, activity drop, over-targeting; LLM-generated priority brief at top via Anthropic API
-- `/admin/users` — invite flow with "Invite from Veeva" primary path (lists active reps from `gold.dim_user` with click-to-invite) + manual escape hatch; provisioned-users audit table
+- `/dashboard` — KPI cards (Interactions / HCPs reached / Active reps with attainment vs goals), pace-aware trend chart with goal overlay line, top reps + top HCPs/HCOs tables, account toggle (HCP/HCO/All), filter bar (range / granularity Week/Month/Quarter / channel), MTD/QTD/YTD presets alongside rolling ranges, all RLS-scoped and clickable through to detail pages
+- `/reps/[user_key]`, `/hcps/[hcp_key]`, `/hcos/[hco_key]` — entity detail pages with KPIs (vs goal where defined), trend, related-entity tables
+- `/inbox` — AI-driven signals: HCP inactivity, activity drop, over-targeting, **goal pace behind**; LLM-generated priority brief at top via Anthropic API
+- `/admin/goals` — recommendation-driven form (auto-fills suggestions from historical actuals + peer median + LLM rationale via "?" button), CSV upload with pre-populated template, period picker with reactive Month/Quarter/Year snap
+- `/admin/mappings` — "Needs mapping" list (top unmapped distributor accounts from `gold.fact_sale`); per-row search-and-pick UI hitting `dim_hcp` + `dim_hco`; saved mappings audit table; writes to Postgres `mapping` table (kind=account_xref) → mirrors via config_sync, propagates via silver_account_xref_build + gold_fact_sale_build
+- `/admin/users` — invite flow with "Invite from Veeva" primary path (lists active reps from `gold.dim_user` with click-to-invite) + manual escape hatch
 - `/admin/tenants` — tenant CRUD
 - **RLS:** per-user role + scope (`admin` / `manager` / `rep` / `bypass`), enforced at the query layer in `apps/web/lib/scope.ts`. See [docs/architecture/rls.md](docs/architecture/rls.md).
 - **Auth + provisioning:** Clerk middleware-protected routes; `/api/webhooks/clerk` auto-provisions `tenant_user` rows from invite metadata. See [docs/architecture/clerk-webhooks.md](docs/architecture/clerk-webhooks.md).
 
 ### Not yet wired
 
+- **Sales metrics on dashboard** — `gold.fact_sale` exists end-to-end but no Net Sales card / Sales-by-quarter trend / Sales-vs-Goal visualization yet.
+- **CSV upload on `/admin/mappings`** — per-row UI works; bulk CSV upload (matching the goals upload pattern) is queued.
+- **Unmapped-accounts signal in `/inbox`** — surface the high-impact unmapped accounts as work-to-do for the mapping admin.
 - `gold.dim_territory`, `gold.bridge_user_territory`, `gold.bridge_hcp_territory` — territory rollups blocked here; manager scope falls back to `manager_id` hierarchy.
-- `gold.bridge_hcp_hco` (HCP↔HCO affiliations) — deferred until sales fact lands; the high-value use case ("$$ at this institution via these HCPs") only materializes when both exist.
+- `gold.bridge_hcp_hco` (HCP↔HCO affiliations) — high-value once we have sales (rolls HCP-level prescribing to HCO institutions).
 - `silver.user_territory_assignment_scd2` for point-in-time rep attribution (current bridge is current-state only).
-- Mislabeled `gold.fact_call.status` column — always "Active" (account-flag carry-through). Use `call_status` for real Veeva status. Cleanup pending next gold rebuild.
-- **Goals** — entire KPI category, no ingest exists. Biggest pharma KPI gap. See [docs/product/goals.md](docs/product/goals.md).
-- **Sales fact** — entire revenue side missing; needs source decision.
+- Mislabeled `gold.fact_call.status` column — always "Active" (account-flag carry-through). Use `call_status` for real Veeva status.
 - Production scheduling — every notebook runs manually today.
 - Tenant variability rules registry — hardcoded per-fennec rules with comments marking them; refactor when tenant #2 lands.
-- `user.deleted` webhook handler for offboarding; Clerk user delete leaves the `tenant_user` row.
+- Mapping kinds beyond account_xref (product, territory, hco_channel, customer_type) — schema supports them, UI doesn't render them yet.
+- `user.deleted` webhook handler for offboarding.
 - Tests. Architecture §9.9 calls for them; we have zero.
 
 ### Immediate next milestone
 
-**Goals product design** — pick the data shape (file upload vs form-entry vs scheduled sync), then build ingest + dashboard surfaces. Goal-attainment is the #1 pharma KPI per the catalog mining; everything else is incremental.
+**Surface sales on the dashboard** — Net Sales card, Sales-by-quarter trend with goal-pace overlay, top accounts by net dollars. Plus the unmapped-accounts signal in `/inbox` so mapping work surfaces as part of the inbox flow.
 
 ## Still open
 
