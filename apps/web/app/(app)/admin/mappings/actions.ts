@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, schema } from "@throughline/db";
+import { and, desc, eq, schema } from "@throughline/db";
 import { db } from "@/lib/db";
 import { queryFabric } from "@/lib/fabric";
+import { triggerNotebookRun } from "@/lib/fabric-jobs";
 import { getCurrentScope } from "@/lib/scope";
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,12 @@ type ResolutionField = keyof typeof RESOLUTION_FIELD_LABELS;
 
 export type UploadMappingsState = {
   saved: number;
+  // Rows with one ID present but not the other — typically "Veeva master
+  // list" rows in the client's file that don't yet have a distributor side
+  // (or template rows the admin hasn't filled in). Not errors, but worth
+  // surfacing as a count so the admin knows how many rows weren't
+  // actionable.
+  skipped: number;
   rowResults: { line: number; status: "ok" | "error"; message: string }[];
   // Per-field count of how many rows resolved via each candidate ID
   // column. Tells the admin "your file uses Network ID by convention" at
@@ -220,7 +227,7 @@ export async function uploadMappingsAction(
   _prev: UploadMappingsState,
   formData: FormData,
 ): Promise<UploadMappingsState> {
-  const empty: UploadMappingsState = { saved: 0, rowResults: [] };
+  const empty: UploadMappingsState = { saved: 0, skipped: 0, rowResults: [] };
 
   const { resolution } = await getCurrentScope();
   if (
@@ -404,6 +411,7 @@ export async function uploadMappingsAction(
 
   const results: UploadMappingsState["rowResults"] = [];
   let saved = 0;
+  let skipped = 0;
   const updatedBy = resolution.scope.role;
 
   for (let i = 1; i < rows.length; i++) {
@@ -418,17 +426,12 @@ export async function uploadMappingsAction(
 
     if (!distributorId && !veevaId) continue; // blank line
 
-    if (!distributorId) {
-      results.push({
-        line: lineNum,
-        status: "error",
-        message: "Missing distributor_account_id",
-      });
-      continue;
-    }
-    if (!veevaId) {
-      // Empty veeva_account_id is a deliberate skip in the template — admin
-      // hasn't filled this row in yet. Quiet result, not an error.
+    if (!distributorId || !veevaId) {
+      // Only one ID present — typically a "Veeva master list" row in the
+      // client's file with no distributor side yet, OR a template row the
+      // admin hasn't filled in. Not actionable as a mapping (we need both
+      // IDs to upsert), but not an error either. Count and move on.
+      skipped += 1;
       continue;
     }
     const match = resolved.get(veevaId);
@@ -517,7 +520,7 @@ export async function uploadMappingsAction(
       count: breakdownCounts[f],
     }));
 
-  return { saved, rowResults: results, resolutionBreakdown };
+  return { saved, skipped, rowResults: results, resolutionBreakdown };
 }
 
 // Tiny CSV parser. Same shape as the goals upload — handles BOM, mixed
@@ -584,3 +587,85 @@ export async function deleteMappingAction(
   revalidatePath("/admin/mappings");
   return { error: null };
 }
+
+// ---------------------------------------------------------------------------
+// Trigger the mapping_propagate pipeline (config_sync →
+// silver_account_xref_build → gold_fact_sale_build) via the Fabric REST
+// API. Fire-and-forget — Fabric runs the orchestrator notebook in the
+// background; we record the trigger to Postgres pipeline_run for the
+// "last run" display, but don't poll for completion. UI just tells the
+// admin "started, refresh in 2-3 min."
+//
+// Admin-only (reps don't manage mappings).
+// ---------------------------------------------------------------------------
+
+export type TriggerPipelineState = {
+  error: string | null;
+  success: string | null;
+};
+
+export async function triggerMappingPipelineAction(
+  _prev: TriggerPipelineState,
+  _formData: FormData,
+): Promise<TriggerPipelineState> {
+  const { resolution } = await getCurrentScope();
+  if (
+    !resolution?.ok ||
+    (resolution.scope.role !== "admin" && resolution.scope.role !== "bypass")
+  ) {
+    return { error: "Not authorized", success: null };
+  }
+  const tenantId = resolution.scope.tenantId;
+  const triggeredBy = resolution.scope.role;
+
+  // Insert the audit row first (status=queued). If the trigger then
+  // fails we update the row to failed; on success we leave it queued
+  // (it'll never transition further unless we add polling later, but
+  // createdAt + jobInstanceId give the admin enough signal that "yes,
+  // something started").
+  const [run] = await db
+    .insert(schema.pipelineRun)
+    .values({
+      tenantId,
+      kind: "mapping_propagate",
+      triggeredBy,
+    })
+    .returning({ id: schema.pipelineRun.id });
+
+  try {
+    const result = await triggerNotebookRun("mapping_propagate_pipeline");
+    if (run) {
+      await db
+        .update(schema.pipelineRun)
+        .set({
+          jobInstanceId: result.jobInstanceId,
+          status: "running",
+        })
+        .where(eq(schema.pipelineRun.id, run.id));
+    }
+    revalidatePath("/admin/mappings");
+    return {
+      error: null,
+      success:
+        "Pipeline started. Sales attribution will reflect new mappings in 2–3 minutes.",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (run) {
+      await db
+        .update(schema.pipelineRun)
+        .set({
+          status: "failed",
+          message,
+          finishedAt: new Date(),
+        })
+        .where(eq(schema.pipelineRun.id, run.id));
+    }
+    revalidatePath("/admin/mappings");
+    return {
+      error: `Trigger failed: ${message}`,
+      success: null,
+    };
+  }
+}
+

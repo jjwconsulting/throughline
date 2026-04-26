@@ -4,10 +4,14 @@ import { getCurrentScope } from "@/lib/scope";
 import {
   loadUnmappedAccounts,
   loadSavedAccountMappings,
+  loadLastMappingPipelineRun,
+  SAVED_MAPPINGS_LOAD_CAP,
 } from "./load";
 import { suggestForUnmapped } from "@/lib/mapping-suggestions";
 import AccountMappingRow from "./account-mapping-row";
 import CsvSection from "./csv-section";
+import SavedMappingsList from "./saved-mappings-list";
+import PipelineTrigger from "./pipeline-trigger";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +25,28 @@ export default async function AdminMappingsPage() {
   }
   const tenantId = resolution.scope.tenantId;
 
-  const [unmapped, saved] = await Promise.all([
+  const [unmappedRaw, saved, lastPipelineRun] = await Promise.all([
     loadUnmappedAccounts(tenantId),
     loadSavedAccountMappings(tenantId),
+    loadLastMappingPipelineRun(tenantId),
   ]);
+
+  // Architectural rule: Postgres is authoritative for admin-edited state,
+  // Fabric mirrors are sync-lagged. unmappedRaw comes from gold.fact_sale
+  // where account_key IS NULL — but that join hasn't been refreshed since
+  // the most recent mapping save. Subtract anything already saved in
+  // Postgres so the admin sees instant feedback after upload / per-row
+  // save, instead of waiting on the silver_account_xref + gold_fact_sale
+  // rebuild. (See feedback memory: postgres_authoritative_for_admin_edits.)
+  const savedSourceKeys = new Set(saved.rows.map((m) => m.sourceKey));
+  const unmappedFiltered = unmappedRaw.filter(
+    (u) => !savedSourceKeys.has(u.distributor_account_id),
+  );
+  // Display cap matches the previous Fabric TOP 100 behavior. Buffer above
+  // (TOP 500) keeps this populated even when the top-of-row-count rows
+  // were just mapped.
+  const unmapped = unmappedFiltered.slice(0, 100);
+  const moreThanShown = unmappedFiltered.length > unmapped.length;
 
   // Compute fuzzy suggestions per unmapped distributor (state-filtered name
   // similarity + city/postal bonus). Cheap in-memory pass after one batched
@@ -66,17 +88,20 @@ export default async function AdminMappingsPage() {
 
       <CsvSection />
 
+      <PipelineTrigger lastRun={lastPipelineRun} />
+
       {/* Primary surface: unmapped accounts that need attention */}
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
           <h2 className="font-display text-xl">Needs mapping</h2>
           <p className="text-xs text-[var(--color-ink-muted)]">
-            Distributor accounts in <span className="font-mono">gold.fact_sale</span>{" "}
-            with no <span className="font-mono">account_xref</span> entry. Most-active
-            first.
+            Distributor accounts in sales data without a Veeva mapping yet.
+            Most-active first. Reflects saves made on this page immediately;
+            sales-side resolution refreshes on the next pipeline run.
             {unmapped.length > 0 ? (
               <span className="ml-2 text-[var(--color-ink)]">
-                {unmapped.length} unmapped
+                {unmapped.length}
+                {moreThanShown ? "+" : ""} unmapped
               </span>
             ) : null}
           </p>
@@ -116,71 +141,12 @@ export default async function AdminMappingsPage() {
         )}
       </div>
 
-      {/* Saved mappings — audit / reference */}
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-xl">Saved mappings</h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            Postgres <span className="font-mono">mapping</span> table where{" "}
-            <span className="font-mono">kind = &apos;account_xref&apos;</span>.
-            These mirror to Fabric on the next{" "}
-            <span className="font-mono">config_sync</span> run.
-          </p>
-        </div>
-        {saved.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
-            No mappings saved yet.
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)]">
-              <tr>
-                <th className="text-left px-4 py-2 font-normal">
-                  Distributor ID
-                </th>
-                <th className="text-left px-4 py-2 font-normal">
-                  Veeva account ID
-                </th>
-                <th className="text-left px-4 py-2 font-normal">Notes</th>
-                <th className="text-left px-4 py-2 font-normal">Updated</th>
-                <th className="text-left px-4 py-2 font-normal">By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {saved.map((m) => (
-                <tr
-                  key={m.id}
-                  className="border-t border-[var(--color-border)]"
-                >
-                  <td className="px-4 py-2 font-mono text-xs">{m.sourceKey}</td>
-                  <td className="px-4 py-2 font-mono text-xs">
-                    {m.targetValue}
-                  </td>
-                  <td className="px-4 py-2 text-[var(--color-ink-muted)]">
-                    {m.notes ?? "—"}
-                  </td>
-                  <td className="px-4 py-2 text-[var(--color-ink-muted)]">
-                    {m.updatedAt.toISOString().slice(0, 10)}
-                  </td>
-                  <td className="px-4 py-2 text-[var(--color-ink-muted)]">
-                    {m.updatedBy}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <SavedMappingsList
+        rows={saved.rows}
+        totalCount={saved.total}
+        loadCap={SAVED_MAPPINGS_LOAD_CAP}
+      />
 
-      <div className="rounded-lg border border-[var(--color-border)] p-4 text-xs text-[var(--color-ink-muted)]">
-        <strong className="text-[var(--color-ink)]">After saving mappings:</strong>{" "}
-        Run <span className="font-mono">config_sync</span> →{" "}
-        <span className="font-mono">silver_account_xref_build</span> →{" "}
-        <span className="font-mono">gold_fact_sale_build</span> in Fabric to
-        propagate the mapping into <span className="font-mono">gold.fact_sale</span>.
-        Until then the dashboard&apos;s sales views still show the rows as
-        unmapped. Pipeline-trigger automation is on the roadmap.
-      </div>
     </div>
   );
 }

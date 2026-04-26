@@ -3,7 +3,7 @@
 import { useActionState, useMemo, useRef, useState } from "react";
 import { uploadMappingsAction, type UploadMappingsState } from "./actions";
 
-const initial: UploadMappingsState = { saved: 0, rowResults: [] };
+const initial: UploadMappingsState = { saved: 0, skipped: 0, rowResults: [] };
 
 // Logical fields the action needs. We translate "user's column header" →
 // these names via FormData "col_*" overrides on submit.
@@ -322,13 +322,24 @@ export default function CsvSection() {
         </button>
       </form>
 
-      {state.rowResults.length > 0 ? (
+      {state.saved > 0 || state.skipped > 0 || state.rowResults.length > 0 ? (
         <div className="rounded border border-[var(--color-border)] overflow-hidden">
           <div className="px-4 py-2 bg-[var(--color-surface-alt)] text-xs text-[var(--color-ink-muted)] flex items-center justify-between">
             <span>
               <span className="text-[var(--color-positive)]">
                 {state.saved} saved
               </span>
+              {state.skipped > 0 ? (
+                <>
+                  {" · "}
+                  <span
+                    className="text-[var(--color-ink-muted)] underline decoration-dotted"
+                    title="Rows with only one ID populated — typically Veeva master-list rows that don't have a distributor side yet. Not errors; they just aren't actionable mappings until both IDs are present."
+                  >
+                    {state.skipped} skipped
+                  </span>
+                </>
+              ) : null}
               {errorCount > 0 ? (
                 <>
                   {" · "}
@@ -372,6 +383,16 @@ export default function CsvSection() {
               </li>
             ))}
           </ul>
+          {state.saved > 0 ? (
+            <div className="px-4 py-3 border-t border-[var(--color-border)] text-xs bg-[var(--color-positive)]/5 text-[var(--color-ink-muted)]">
+              <strong className="text-[var(--color-ink)]">
+                Mappings are live.
+              </strong>{" "}
+              Refresh the page to see the &quot;Needs mapping&quot; list
+              update below. Sales rollups and dashboard tiles refresh on
+              the next data sync (typically nightly).
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

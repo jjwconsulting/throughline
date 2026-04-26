@@ -52,6 +52,20 @@ export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
   "bypass",
 ]);
 
+// Each value names a Fabric notebook (or pipeline) that the web app can
+// trigger from /admin. Add a row here when wiring up a new triggerable
+// pipeline (e.g. a future `veeva_refresh` button).
+export const pipelineKindEnum = pgEnum("pipeline_kind", [
+  "mapping_propagate",
+]);
+
+export const pipelineStatusEnum = pgEnum("pipeline_status", [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+]);
+
 // SFTP feed cadence model. Drives the silver build's batch-selection logic:
 //   full_snapshot — each new file is a complete snapshot (e.g. IntegriChain
 //                   867 inception-to-date). Silver reads only rows from the
@@ -168,6 +182,34 @@ export const mapping = pgTable("mapping", {
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
+});
+
+// Audit + last-run-display log for admin-triggered Fabric pipelines.
+// One row per trigger. status starts 'queued' on insert, web UI doesn't
+// poll (yet) — admin sees the trigger ack and the wall clock; subsequent
+// page loads show the most recent row's createdAt as "Last run X minutes
+// ago." If we later add status polling, the row gets updated to running
+// → succeeded / failed.
+export const pipelineRun = pgTable("pipeline_run", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenant.id, { onDelete: "cascade" }),
+  kind: pipelineKindEnum("kind").notNull(),
+  // Fabric job instance id returned by the trigger API (location header
+  // suffix). Populated when the trigger succeeds; null on synchronous
+  // trigger failure (e.g. auth error before the API ever ran).
+  jobInstanceId: text("job_instance_id"),
+  status: pipelineStatusEnum("status").notNull().default("queued"),
+  // Free-form text from API failure or notebook exit value. Bounded to
+  // a few KB by Postgres text type; trim if the LLM-generated brief
+  // ever needs to summarize this.
+  message: text("message"),
+  triggeredBy: text("triggered_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
 });
 
 export const tenantVeeva = pgTable("tenant_veeva", {

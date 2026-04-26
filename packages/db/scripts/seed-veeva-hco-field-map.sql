@@ -28,11 +28,12 @@ CROSS JOIN (VALUES
   ('account_group',        'account_group__v'),
   -- Cross-system identifiers used by /admin/mappings upload's multi-field
   -- resolution. Source-tenant variability: each Veeva tenant may have
-  -- different subsets of these populated. Silver build leaves NULLs
-  -- where the source field doesn't exist.
-  ('network_id',           'network_id__v'),
+  -- different subsets of these populated. Silver build silently emits
+  -- NULL (with a warning) for any whose bronze column is missing.
+  -- Network ID is the canonical cross-system pharma master-data spine —
+  -- transitioning clients commonly use it as their mapping-file join key.
+  ('network_id',           'veeva_network_id__v'),
   ('npi',                  'npi__v'),
-  ('dea_number',           'dea_number__v'),
   ('aha_id',               'aha__v'),
   ('bed_count',            'beds__c'),
   ('email',                'vt_hco_email__c'),

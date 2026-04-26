@@ -377,6 +377,97 @@ function formatPeriodShort(periodStart: string, periodEnd: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Unmapped distributor accounts: high-$ distributor IDs flowing into
+// fact_sale that don't have a Veeva account_xref entry yet. Admin-only —
+// reps don't manage mappings. Postgres-authoritative (excludes any
+// distributor already mapped in Postgres, regardless of whether the
+// Fabric pipeline has refreshed gold.fact_sale.account_key).
+// ---------------------------------------------------------------------------
+
+const UNMAPPED_RECENT_DAYS = 90;
+const UNMAPPED_DOLLAR_THRESHOLD = 1_000;
+const UNMAPPED_WARNING_DOLLAR_THRESHOLD = 10_000;
+
+type UnmappedDistributorRow = {
+  distributor_account_id: string;
+  distributor_account_name: string | null;
+  account_state: string | null;
+  net_gross_dollars: number;
+  rows: number;
+  last_seen: string;
+};
+
+export async function loadUnmappedAccountSignals(
+  tenantId: string,
+  userScope: UserScope,
+): Promise<Signal[]> {
+  // Admin/bypass only — reps don't manage account_xref mappings.
+  if (userScope.role !== "admin" && userScope.role !== "bypass") return [];
+
+  let rows: UnmappedDistributorRow[] = [];
+  try {
+    rows = await queryFabric<UnmappedDistributorRow>(
+      tenantId,
+      `SELECT TOP 100
+         distributor_account_id,
+         MAX(distributor_account_name) AS distributor_account_name,
+         MAX(account_state) AS account_state,
+         ROUND(SUM(signed_gross_dollars), 0) AS net_gross_dollars,
+         COUNT(*) AS rows,
+         CONVERT(varchar(10), MAX(transaction_date), 23) AS last_seen
+       FROM gold.fact_sale
+       WHERE tenant_id = @tenantId
+         AND account_key IS NULL
+         AND distributor_account_id IS NOT NULL
+         AND transaction_date >= DATEADD(DAY, -${UNMAPPED_RECENT_DAYS}, CAST(GETDATE() AS date))
+       GROUP BY distributor_account_id
+       HAVING ABS(SUM(signed_gross_dollars)) >= ${UNMAPPED_DOLLAR_THRESHOLD}
+       ORDER BY ABS(SUM(signed_gross_dollars)) DESC`,
+    );
+  } catch {
+    return [];
+  }
+  if (rows.length === 0) return [];
+
+  // Postgres-authoritative filter: a distributor with a saved mapping
+  // shouldn't appear here even if Fabric hasn't refreshed yet. Same
+  // pattern as /admin/mappings page.
+  const savedKeys = await db
+    .select({ sourceKey: schema.mapping.sourceKey })
+    .from(schema.mapping)
+    .where(
+      and(
+        eq(schema.mapping.tenantId, tenantId),
+        eq(schema.mapping.kind, "account_xref"),
+      ),
+    );
+  const savedSet = new Set(savedKeys.map((s) => s.sourceKey));
+
+  return rows
+    .filter((r) => !savedSet.has(r.distributor_account_id))
+    .slice(0, MAX_SIGNALS)
+    .map((r) => {
+      const dollars = Math.abs(r.net_gross_dollars);
+      const dollarStr =
+        dollars >= 1_000_000
+          ? `$${(dollars / 1_000_000).toFixed(1)}M`
+          : dollars >= 1_000
+            ? `$${(dollars / 1_000).toFixed(0)}K`
+            : `$${Math.round(dollars)}`;
+      const name = r.distributor_account_name ?? r.distributor_account_id;
+      const stateChunk = r.account_state ? ` · ${r.account_state}` : "";
+      return {
+        type: "unmapped_distributor",
+        severity: dollars >= UNMAPPED_WARNING_DOLLAR_THRESHOLD ? "warning" : "info",
+        title: `${name} — ${dollarStr} unmapped`,
+        detail: `${r.rows} sales row${r.rows === 1 ? "" : "s"}${stateChunk} · last seen ${r.last_seen}`,
+        href: "/admin/mappings",
+        rank: dollars,
+      } satisfies Signal;
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Combined loader for the inbox page.
 // ---------------------------------------------------------------------------
 
@@ -392,13 +483,33 @@ export async function loadAllSignals(
   userScope: UserScope,
   sqlScope: Scope,
 ): Promise<SignalGroup[]> {
-  const [inactive, drop, overTargeted, pace] = await Promise.all([
+  const [inactive, drop, overTargeted, pace, unmapped] = await Promise.all([
     loadHcpInactivitySignals(tenantId, sqlScope),
     loadActivityDropSignals(tenantId, sqlScope),
     loadOverTargetingSignals(tenantId, sqlScope),
     loadGoalPaceSignals(tenantId, userScope, sqlScope),
+    loadUnmappedAccountSignals(tenantId, userScope),
   ]);
-  return [
+
+  const isAdminLike =
+    userScope.role === "admin" || userScope.role === "bypass";
+
+  const groups: SignalGroup[] = [];
+
+  // Admin-only: surface the mapping work-to-do at the TOP since it
+  // gates accurate sales attribution downstream. Skip the group entirely
+  // for non-admins (no point showing reps an empty "unmapped accounts"
+  // panel they can't act on).
+  if (isAdminLike) {
+    groups.push({
+      key: "unmapped_accounts",
+      title: "Unmapped distributor accounts",
+      subtitle: `Sales-active distributors over the last ${UNMAPPED_RECENT_DAYS} days with no Veeva mapping yet (≥$${(UNMAPPED_DOLLAR_THRESHOLD / 1_000).toFixed(0)}K). Map these so the dashboard's HCO breakdowns attribute correctly.`,
+      signals: unmapped,
+    });
+  }
+
+  groups.push(
     {
       key: "goal_pace_behind",
       title: "Behind on goal pace",
@@ -423,5 +534,6 @@ export async function loadAllSignals(
       subtitle: `HCPs called more than ${OVER_TARGETING_THRESHOLD} times in the last ${OVER_TARGETING_WINDOW_DAYS} days`,
       signals: overTargeted,
     },
-  ];
+  );
+  return groups;
 }

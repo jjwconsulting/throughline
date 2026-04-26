@@ -50,6 +50,13 @@
       "when": 1777116027001,
       "tag": "0006_productive_maestro",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777198662338,
+      "tag": "0007_big_wendigo",
+      "breakpoints": true
     }
   ]
 }
