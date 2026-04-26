@@ -618,14 +618,14 @@ export async function triggerMappingPipelineAction(
   const tenantId = resolution.scope.tenantId;
   const triggeredBy = resolution.scope.role;
 
-  // Insert the audit row first (status=queued). If the trigger then
-  // fails we update the row to failed; on success we leave it queued
-  // (it'll never transition further unless we add polling later, but
-  // createdAt + jobInstanceId give the admin enough signal that "yes,
-  // something started").
+  // Insert audit row at status=queued. The orchestrator notebook will
+  // flip it to 'running' once it picks up the parameters, and to
+  // 'succeeded' / 'failed' on completion via Supabase REST writeback.
+  // Single source of truth — no double-writing from notebook side.
   const [run] = await db
     .insert(schema.pipelineRun)
     .values({
+      scope: "tenant",
       tenantId,
       kind: "mapping_propagate",
       triggeredBy,
@@ -633,14 +633,19 @@ export async function triggerMappingPipelineAction(
     .returning({ id: schema.pipelineRun.id });
 
   try {
-    const result = await triggerNotebookRun("mapping_propagate_pipeline");
+    const result = await triggerNotebookRun("mapping_propagate_pipeline", {
+      pipeline_run_id: run?.id ?? null,
+      tenant_id: tenantId,
+      triggered_by: triggeredBy,
+    });
     if (run) {
+      // Just record the Fabric job instance id so Fabric Monitor can be
+      // cross-referenced if needed. Status update is the notebook's job
+      // now (it knows when it actually starts running vs queued behind
+      // capacity).
       await db
         .update(schema.pipelineRun)
-        .set({
-          jobInstanceId: result.jobInstanceId,
-          status: "running",
-        })
+        .set({ jobInstanceId: result.jobInstanceId })
         .where(eq(schema.pipelineRun.id, run.id));
     }
     revalidatePath("/admin/mappings");

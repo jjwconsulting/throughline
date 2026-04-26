@@ -38,6 +38,12 @@ export default async function TenantsPage() {
           >
             Mappings →
           </Link>
+          <Link
+            href="/admin/pipelines"
+            className="text-[var(--color-primary)] hover:underline"
+          >
+            Pipelines →
+          </Link>
         </p>
       </div>
 

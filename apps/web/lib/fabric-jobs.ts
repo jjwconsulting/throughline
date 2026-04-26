@@ -141,8 +141,14 @@ export type TriggerResult = {
 // Fires a notebook run. Returns immediately with the job instance id;
 // doesn't wait for completion. Caller is responsible for any polling
 // (we don't poll today — the UI just shows "started, refresh in N min").
+//
+// Parameters (optional) override the notebook's "parameters"-tagged cell
+// at execution time. Used by mapping_propagate to pass pipeline_run_id,
+// tenant_id, triggered_by so the notebook updates the row the web
+// action already inserted (instead of double-writing).
 export async function triggerNotebookRun(
   displayName: string,
+  parameters?: Record<string, string | number | boolean | null>,
 ): Promise<TriggerResult> {
   const env = readEnv();
   const [token, notebookId] = await Promise.all([
@@ -151,15 +157,30 @@ export async function triggerNotebookRun(
   ]);
 
   const url = `${FABRIC_API_BASE}/workspaces/${env.workspaceId}/items/${notebookId}/jobs/instances?jobType=RunNotebook`;
+
+  // Fabric's executionData.parameters expects each value as
+  // { value: string, type: "string" | "int" | "bool" | "float" }.
+  // We coerce everything to string for simplicity — notebook-side Python
+  // can re-cast as needed.
+  let body: string | undefined;
+  if (parameters && Object.keys(parameters).length > 0) {
+    const fabricParams: Record<string, { value: string; type: string }> = {};
+    for (const [k, v] of Object.entries(parameters)) {
+      if (v == null) continue;
+      fabricParams[k] = { value: String(v), type: "string" };
+    }
+    body = JSON.stringify({
+      executionData: { parameters: fabricParams },
+    });
+  }
+
   const res = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    // Body intentionally empty — we're not parameterizing the notebook.
-    // If we ever need to pass distributor IDs / tenant filters into the
-    // pipeline, add an `executionData.parameters` payload here.
+    body,
   });
 
   if (res.status !== 202) {

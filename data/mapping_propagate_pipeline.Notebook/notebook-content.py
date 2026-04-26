@@ -24,60 +24,73 @@
 
 # # Pipeline: mapping_propagate
 #
-# Orchestrator. Runs the three notebooks needed to propagate Postgres
-# `mapping` table changes (account_xref) into `gold.fact_sale.account_key`
-# so dashboard sales attribution refreshes:
+# Tenant-scoped pipeline. Triggered by the "Run sync now" button on
+# /admin/mappings (web app) — admin saves mappings, clicks the button,
+# this notebook propagates them through:
 #
-#   1. config_sync                — mirrors Postgres mapping rows into
-#                                   Fabric config.mapping
-#   2. silver_account_xref_build  — joins config + bronze CSV imports into
-#                                   silver.account_xref (UI wins on conflict)
-#   3. gold_fact_sale_build       — re-joins silver.sale to silver.account_xref
-#                                   to dim_hcp/dim_hco; populates account_key
+#   1. config_sync                — Postgres mapping rows → Fabric
+#                                   config.mapping
+#   2. silver_account_xref_build  — Bronze CSV + Postgres mappings →
+#                                   silver.account_xref (UI wins)
+#   3. gold_fact_sale_build       — silver.sale × silver.account_xref ×
+#                                   dim_hcp/dim_hco → gold.fact_sale
+#                                   (account_key populated)
 #
-# Triggered by:
-#   - The "Run pipeline" button on /admin/mappings (web app fires the
-#     Fabric REST API). End-user / admin path.
-#   - Scheduled run (configure in Fabric: workspace settings → schedule).
-#     Recommended: every few hours OR nightly.
-#   - Manual: open this notebook + click Run.
+# Note: the underlying child notebooks process ALL tenants in a single
+# run (config_sync mirrors all tenant mapping rows, etc.). The "tenant"
+# scope here is about WHO TRIGGERED the run for accountability +
+# /admin/pipelines display, not about a per-tenant subset of work.
 #
-# Failure handling: each step's exception bubbles up so the run fails
-# loudly. Caller (REST API client / Fabric run history) shows the failure.
+# Web flow (parameters passed in via Fabric REST API):
+#   pipeline_run_id — the UUID the web action just inserted in
+#                     pipeline_run with status='queued'. Notebook updates
+#                     this same row instead of double-inserting.
+#   tenant_id       — the tenant whose admin clicked the button.
+#   triggered_by    — 'admin' | 'bypass'. Identifies role on the audit row.
+#
+# Schedule flow: parameters are not supplied (left as defaults). Notebook
+# inserts its own pipeline_run row. mapping_propagate isn't currently
+# scheduled — the daily incremental_refresh re-runs these same steps as
+# part of the broader chain — but the pattern supports either trigger.
 
 # CELL ********************
 
-import time
+# MAGIC %run pipeline_config
 
-steps = [
-    "config_sync",
-    "silver_account_xref_build",
-    "gold_fact_sale_build",
-]
+# CELL ********************
 
-# Per-step timeout in seconds. Each notebook runs the full silver/gold
-# transform — should complete in well under 5 minutes for any tenant
-# we'd reasonably support. Bump if a tenant ever exceeds this.
-STEP_TIMEOUT_SECONDS = 600
+# Parameter cell — values here are overridable by the Fabric REST API
+# trigger via executionData.parameters. Defaults apply when notebook
+# runs standalone (manual or scheduled).
+pipeline_run_id: str | None = None
+tenant_id: str | None = None
+triggered_by: str = "schedule"
 
-run_started_at = time.time()
-print(f"=== mapping_propagate_pipeline started ===")
+# METADATA ********************
 
-for step in steps:
-    print(f"\n→ Running {step}...")
-    step_start = time.time()
-    # mssparkutils.notebook.run resolves notebooks by displayName within
-    # the same workspace. Returns the notebook's `mssparkutils.notebook.exit()`
-    # value (or raises if the run fails / times out).
-    result = mssparkutils.notebook.run(step, STEP_TIMEOUT_SECONDS)
-    step_elapsed = time.time() - step_start
-    print(f"✓ {step} completed in {step_elapsed:.1f}s. Result: {result}")
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark",
+# META   "tags": ["parameters"]
+# META }
 
-total_elapsed = time.time() - run_started_at
-print(f"\n=== mapping_propagate_pipeline finished in {total_elapsed:.1f}s ===")
+# CELL ********************
 
-# Exit value goes back to the caller (web REST API consumer) as a string.
-mssparkutils.notebook.exit(f"OK in {total_elapsed:.1f}s across {len(steps)} steps")
+run_orchestrator(
+    pipeline_kind="mapping_propagate",
+    steps=[
+        "config_sync",
+        "silver_account_xref_build",
+        "gold_fact_sale_build",
+    ],
+    scope="tenant",
+    tenant_id=tenant_id,
+    triggered_by=triggered_by,
+    step_timeout_s=600,
+    pipeline_run_id=pipeline_run_id,
+)
+
+mssparkutils.notebook.exit("done")
 
 # METADATA ********************
 

@@ -52,11 +52,29 @@ export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
   "bypass",
 ]);
 
-// Each value names a Fabric notebook (or pipeline) that the web app can
-// trigger from /admin. Add a row here when wiring up a new triggerable
-// pipeline (e.g. a future `veeva_refresh` button).
+// Each value names a Fabric notebook (or pipeline) that the web app
+// surfaces under /admin/pipelines. Two tiers:
+//
+// Global (scope='global', tenant_id null) — ops-managed, NOT customer-
+// triggerable. Read-only on the health page.
+//   - incremental_refresh:   Veeva incremental + SFTP + downstream rebuilds
+//   - weekly_full_refresh:   Veeva full ingest + complete rebuild (catches
+//                            deletes / late updates incremental misses)
+//   - delta_maintenance:     OPTIMIZE + VACUUM across delta tables
+//
+// Tenant (scope='tenant', tenant_id required) — customer-triggerable from
+// the relevant admin surface (mapping_propagate from /admin/mappings).
+//   - mapping_propagate:     config_sync + silver_account_xref + gold_fact_sale
 export const pipelineKindEnum = pgEnum("pipeline_kind", [
   "mapping_propagate",
+  "incremental_refresh",
+  "weekly_full_refresh",
+  "delta_maintenance",
+]);
+
+export const pipelineScopeEnum = pgEnum("pipeline_scope", [
+  "global",
+  "tenant",
 ]);
 
 export const pipelineStatusEnum = pgEnum("pipeline_status", [
@@ -184,27 +202,45 @@ export const mapping = pgTable("mapping", {
     .defaultNow(),
 });
 
-// Audit + last-run-display log for admin-triggered Fabric pipelines.
-// One row per trigger. status starts 'queued' on insert, web UI doesn't
-// poll (yet) — admin sees the trigger ack and the wall clock; subsequent
-// page loads show the most recent row's createdAt as "Last run X minutes
-// ago." If we later add status polling, the row gets updated to running
-// → succeeded / failed.
+// Audit + health-monitor log for all Fabric pipeline runs (manual web
+// triggers, scheduled runs, and tenant-onboarding actions). One row per
+// run. Populated by:
+//   - The web trigger action (start row only; user sees an immediate ack)
+//   - The orchestrator notebook itself, via Supabase REST API writeback
+//     (start + finish row updates with step_metrics + error)
+//
+// Scoping:
+//   scope='global', tenant_id=null   — Veeva refresh, delta maintenance,
+//                                      anything that processes ALL tenants
+//                                      in one run
+//   scope='tenant', tenant_id=<uuid> — single-tenant work like
+//                                      mapping_propagate or future
+//                                      tenant_onboard
 export const pipelineRun = pgTable("pipeline_run", {
   id: uuid("id").primaryKey().defaultRandom(),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenant.id, { onDelete: "cascade" }),
+  scope: pipelineScopeEnum("scope").notNull().default("tenant"),
+  // Nullable: required when scope='tenant', null when scope='global'.
+  // (We don't enforce this with a CHECK constraint to keep the migration
+  // simple; loaders + writers handle the convention.)
+  tenantId: uuid("tenant_id").references(() => tenant.id, { onDelete: "cascade" }),
   kind: pipelineKindEnum("kind").notNull(),
   // Fabric job instance id returned by the trigger API (location header
-  // suffix). Populated when the trigger succeeds; null on synchronous
-  // trigger failure (e.g. auth error before the API ever ran).
+  // suffix). Populated when web triggers via REST; null when the
+  // orchestrator runs from a Fabric schedule (since no trigger API call
+  // happened on our side).
   jobInstanceId: text("job_instance_id"),
   status: pipelineStatusEnum("status").notNull().default("queued"),
-  // Free-form text from API failure or notebook exit value. Bounded to
-  // a few KB by Postgres text type; trim if the LLM-generated brief
-  // ever needs to summarize this.
+  // Per-step metrics from the orchestrator: { "step_name": { "rows": N,
+  // "duration_s": X, "status": "ok"|"error" } }. Schema-less so each
+  // pipeline can record what's relevant without table changes.
+  stepMetrics: text("step_metrics"),
+  // Stack trace or error message from a failed step. Plain text so the
+  // health page can render verbatim; LLM brief can summarize later.
+  error: text("error"),
+  // Short human-readable summary, e.g. "OK in 78s across 3 steps".
   message: text("message"),
+  // 'admin' / 'bypass' for web triggers, 'schedule' for Fabric scheduler,
+  // 'system' for action-triggered (tenant onboarding etc.).
   triggeredBy: text("triggered_by").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()

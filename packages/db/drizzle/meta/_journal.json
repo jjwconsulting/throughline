@@ -57,6 +57,13 @@
       "when": 1777198662338,
       "tag": "0007_big_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777203929933,
+      "tag": "0008_stale_captain_cross",
+      "breakpoints": true
     }
   ]
 }

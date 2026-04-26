@@ -10,6 +10,7 @@ import {
   loadSalesKpis,
   loadSalesTrend,
   loadTopUnmappedDistributors,
+  loadTopHcosBySales,
 } from "@/lib/sales";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
@@ -100,6 +101,7 @@ export default async function Dashboard({
     salesKpis,
     salesTrend,
     topUnmapped,
+    topHcosBySales,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, rlsScope),
     loadTrend(tenantId, filters, rlsScope),
@@ -120,6 +122,7 @@ export default async function Dashboard({
     loadSalesKpis(tenantId, filters),
     loadSalesTrend(tenantId, filters),
     loadTopUnmappedDistributors(tenantId, filters, 10),
+    loadTopHcosBySales(tenantId, filters, 10),
   ]);
 
   const period = periodLabel(filters.range);
@@ -395,6 +398,82 @@ export default async function Dashboard({
           )}
         </div>
       </div>
+
+      {topHcosBySales.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">Top HCOs by Net Sales</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Net dollars in {period}. Unmapped distributor sales appear
+              as their own line so totals always reconcile.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">HCO</th>
+                <th className="text-left font-normal px-5 py-2">Type</th>
+                <th className="text-left font-normal px-5 py-2">Location</th>
+                <th className="text-right font-normal px-5 py-2">Net sales</th>
+                <th className="text-right font-normal px-5 py-2">Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topHcosBySales.map((h, i) => {
+                const isUnmapped = h.hco_key == null;
+                return (
+                  <tr
+                    key={h.hco_key ?? "__unmapped__"}
+                    className={
+                      "border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)] " +
+                      (isUnmapped ? "bg-[var(--color-surface-alt)]/40" : "")
+                    }
+                  >
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {i + 1}
+                    </td>
+                    <td className="px-5 py-2">
+                      {isUnmapped ? (
+                        <Link
+                          href="/admin/mappings"
+                          className="text-[var(--color-ink-muted)] italic hover:text-[var(--color-primary)] hover:underline"
+                        >
+                          {h.name}
+                          {h.distributor_count != null
+                            ? ` (${h.distributor_count} distributor${h.distributor_count === 1 ? "" : "s"})`
+                            : ""}
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/hcos/${encodeURIComponent(h.hco_key!)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {h.name}
+                        </Link>
+                      )}
+                    </td>
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {isUnmapped ? "—" : (h.hco_type ?? "—")}
+                    </td>
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {isUnmapped
+                        ? "—"
+                        : [h.city, h.state].filter(Boolean).join(", ") || "—"}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono">
+                      {formatCompactDollars(h.net_gross_dollars)}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                      {formatNumber(Math.round(h.net_units))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       {topUnmapped.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">

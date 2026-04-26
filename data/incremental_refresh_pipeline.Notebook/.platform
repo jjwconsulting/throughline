@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "incremental_refresh_pipeline"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "3c0d5e6f-7890-1234-cdef-012345678901"
+  }
+}

@@ -7,6 +7,11 @@ import {
   hcoScope,
   type Scope,
 } from "@/lib/interactions";
+import {
+  loadHcoSalesKpis,
+  loadHcoSalesTrend,
+  loadHcoTopProducts,
+} from "@/lib/sales";
 import { getCurrentScope, scopeToSql, combineScopes } from "@/lib/scope";
 import {
   filterClauses,
@@ -87,6 +92,14 @@ function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+function formatCompactDollars(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${Math.round(abs)}`;
+}
+
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "—";
   return new Date(dateStr).toLocaleDateString("en-US", {
@@ -135,14 +148,26 @@ export default async function HcoDetail({
   if (!hco) notFound();
 
   const sqlScope = combineScopes(hcoScope(hco_key), scopeToSql(userScope));
-  const [kpis, trend, callingReps] = await Promise.all([
-    loadInteractionKpis(tenantId, filters, sqlScope),
-    loadTrend(tenantId, filters, sqlScope),
-    loadHcoCallingReps(tenantId, filters, sqlScope),
-  ]);
+  const [kpis, trend, callingReps, salesKpis, salesTrend, topProducts] =
+    await Promise.all([
+      loadInteractionKpis(tenantId, filters, sqlScope),
+      loadTrend(tenantId, filters, sqlScope),
+      loadHcoCallingReps(tenantId, filters, sqlScope),
+      loadHcoSalesKpis(tenantId, hco_key, filters),
+      loadHcoSalesTrend(tenantId, hco_key, filters),
+      loadHcoTopProducts(tenantId, hco_key, filters, 10),
+    ]);
+
+  // Show the sales-related surfaces only when this HCO actually has sales
+  // history. New tenants (or HCOs that have never been a ship-to) get the
+  // pure-calls layout the page used to render — no empty-table noise.
+  const hasSalesHistory =
+    salesKpis.last_sale != null ||
+    salesKpis.net_gross_dollars_period !== 0 ||
+    salesKpis.net_gross_dollars_prior !== 0;
 
   const period = periodLabel(filters.range);
-  const cards = [
+  const cards: { label: string; value: string; delta: string | null }[] = [
     {
       label: `Interactions (${period})`,
       value: formatNumber(kpis.calls_period),
@@ -162,6 +187,19 @@ export default async function HcoDetail({
       delta: kpis.last_call ? formatDate(kpis.last_call) : null,
     },
   ];
+  if (hasSalesHistory) {
+    cards.push({
+      label: `Net sales (${period})`,
+      value: formatCompactDollars(salesKpis.net_gross_dollars_period),
+      delta:
+        filters.range !== "all" && salesKpis.net_gross_dollars_prior !== 0
+          ? deltaLabel(
+              salesKpis.net_gross_dollars_period,
+              salesKpis.net_gross_dollars_prior,
+            )
+          : null,
+    });
+  }
 
   const subtitleBits = [
     hco.hco_type,
@@ -209,7 +247,13 @@ export default async function HcoDetail({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div
+        className={
+          hasSalesHistory
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+            : "grid grid-cols-1 md:grid-cols-3 gap-4"
+        }
+      >
         {cards.map((c) => (
           <div
             key={c.label}
@@ -240,6 +284,84 @@ export default async function HcoDetail({
           <TrendChart data={trend} />
         </div>
       </div>
+
+      {hasSalesHistory ? (
+        <>
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+            <div className="px-5 py-4 border-b border-[var(--color-border)]">
+              <h2 className="font-display text-lg">
+                Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+              </h2>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+                most recent {filters.granularity}
+                {chartBuckets(filters) === 1 ? "" : "s"} for {hco.name}
+                {salesKpis.last_sale ? (
+                  <>
+                    {" "}· last sale {formatDate(salesKpis.last_sale)}
+                  </>
+                ) : null}
+              </p>
+            </div>
+            <div className="px-2 py-4">
+              <TrendChart
+                data={salesTrend}
+                valueKey="net_dollars"
+                valueLabel="Net sales"
+                format="dollars"
+              />
+            </div>
+          </div>
+
+          {topProducts.length > 0 ? (
+            <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+              <div className="px-5 py-4 border-b border-[var(--color-border)]">
+                <h2 className="font-display text-lg">Top products</h2>
+                <p className="text-xs text-[var(--color-ink-muted)]">
+                  By net sales in {period} for {hco.name}
+                </p>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="text-xs text-[var(--color-ink-muted)]">
+                  <tr>
+                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                    <th className="text-left font-normal px-5 py-2">Product</th>
+                    <th className="text-left font-normal px-5 py-2">NDC</th>
+                    <th className="text-left font-normal px-5 py-2">Brand</th>
+                    <th className="text-right font-normal px-5 py-2">Net sales</th>
+                    <th className="text-right font-normal px-5 py-2">Units</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topProducts.map((p, i) => (
+                    <tr
+                      key={p.product_ndc ?? `${p.product_name ?? "unknown"}-${i}`}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">{p.product_name ?? "—"}</td>
+                      <td className="px-5 py-2 font-mono text-xs text-[var(--color-ink-muted)]">
+                        {p.product_ndc ?? "—"}
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {p.brand ?? "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatCompactDollars(p.net_gross_dollars)}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                        {formatNumber(Math.round(p.net_units))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
