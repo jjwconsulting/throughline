@@ -68,7 +68,11 @@ def record_pipeline_run_start(kind, scope="global", tenant_id=None, triggered_by
             f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}",
             headers=_SUPABASE_HEADERS, json=payload, timeout=30,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 300:
+            print(f"⚠ pipeline_run start writeback failed: HTTP {resp.status_code}")
+            print(f"   request body: {payload}")
+            print(f"   response body: {resp.text}")
+            return None
         return resp.json()[0]["id"]
     except Exception as exc:
         print(f"⚠ pipeline_run start writeback failed: {exc}")
