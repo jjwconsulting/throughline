@@ -25,32 +25,85 @@
 # # Pipeline: delta_maintenance
 #
 # Global pipeline. Periodic delta-table housekeeping:
+#   - OPTIMIZE              compacts small files into larger ones
+#   - VACUUM RETAIN 168     removes file versions older than 7 days
 #
-#   - OPTIMIZE              compacts small files into larger ones.
-#                           Without this, repeated incremental writes
-#                           leave thousands of small parquet files that
-#                           tank query performance.
-#   - VACUUM RETAIN 168     removes old file versions older than 7 days
-#                           (168 hours). Frees storage.
+# Cadence: weekly Sunday ~4am, AFTER weekly_full_refresh.
 #
-# Cadence: weekly Sunday ~4am, AFTER weekly_full_refresh completes.
+# Doesn't use run_orchestrator since the unit of work is a SQL command
+# per table, not a child notebook. Records its own pipeline_run row.
 #
-# This notebook orchestrates ITSELF (no child notebooks) — runs OPTIMIZE
-# and VACUUM directly via Spark SQL on each table. Doesn't use
-# `run_orchestrator` since the unit of work is a table-level command, not
-# a child notebook. Records its own pipeline_run row manually.
+# Helpers below are inlined from the same shape used by every
+# orchestrator notebook — keep in sync if you edit one, edit all.
 
 # CELL ********************
 
-# MAGIC %run pipeline_config
+import json
+import time
+from datetime import datetime, timezone
+
+import requests
+
+SUPABASE_URL       = "https://zucvjyhnqsjuryqxgqzb.supabase.co"
+PIPELINE_RUN_TABLE = "pipeline_run"
+
+_secrets_path = "Files/secrets/pipeline_config.json"
+_secrets = json.loads(mssparkutils.fs.head(_secrets_path, 8192))
+SUPABASE_SERVICE_ROLE_KEY = _secrets["supabase_service_role_key"]
+
+_SUPABASE_HEADERS = {
+    "apikey":        SUPABASE_SERVICE_ROLE_KEY,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    "Content-Type":  "application/json",
+    "Prefer":        "return=representation",
+}
+
+
+def record_pipeline_run_start(kind, scope="global", tenant_id=None, triggered_by="schedule"):
+    payload = {
+        "kind": kind, "scope": scope, "tenant_id": tenant_id,
+        "status": "running", "triggered_by": triggered_by,
+    }
+    try:
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}",
+            headers=_SUPABASE_HEADERS, json=payload, timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()[0]["id"]
+    except Exception as exc:
+        print(f"⚠ pipeline_run start writeback failed: {exc}")
+        return None
+
+
+def record_pipeline_run_finish(run_id, status, step_metrics=None, error=None, message=None):
+    if not run_id:
+        return
+    payload = {
+        "status": status,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "step_metrics": json.dumps(step_metrics) if step_metrics else None,
+        "error": error, "message": message,
+    }
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}?id=eq.{run_id}",
+            headers=_SUPABASE_HEADERS, json=payload, timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"⚠ pipeline_run finish writeback failed: {exc}")
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
 # CELL ********************
 
-# Tables to maintain. Order doesn't matter — each is independent. Add
-# new gold/silver tables here when they're created.
 TABLES = [
-    # Bronze is huge but rebuilt frequently from source — usually skipped.
-    # Add specific bronze tables here if their query patterns warrant it.
     "silver.picklist",
     "silver.hcp",
     "silver.hco",
@@ -71,33 +124,23 @@ TABLES = [
     "gold.fact_goal",
 ]
 
-# How many hours of file history to keep on VACUUM. 168 = 7 days, leaves
-# room for time-travel debugging within a week. Default is 720 (30 days);
-# we shorten it because we don't need long version history in dev.
 VACUUM_RETAIN_HOURS = 168
 
 # CELL ********************
 
-import time
-from datetime import datetime, timezone
-
 run_id = record_pipeline_run_start(
-    kind="delta_maintenance",
-    scope="global",
-    tenant_id=None,
-    triggered_by="schedule",
+    kind="delta_maintenance", scope="global", tenant_id=None, triggered_by="schedule",
 )
 
-step_metrics: dict[str, dict] = {}
+step_metrics = {}
 overall_start = time.time()
 failed_table = None
 error_text = None
 
 for table in TABLES:
-    metric: dict = {"status": "ok"}
+    metric = {"status": "ok"}
     table_start = time.time()
     try:
-        # Skip tables that don't exist yet (e.g. fact_goal in fresh tenants).
         if not spark.catalog.tableExists(table):
             metric["status"] = "skipped"
             metric["reason"] = "table_not_found"
@@ -105,29 +148,21 @@ for table in TABLES:
             print(f"~ {table}: skipped (not found)")
             continue
 
-        # OPTIMIZE — compact small files. Returns a row with metrics that
-        # we capture for visibility on the health page.
         opt_result = spark.sql(f"OPTIMIZE {table}").collect()
         if opt_result:
             row = opt_result[0].asDict()
-            metric["optimize"] = {
-                "files_added":   row.get("metrics", {}).get("numFilesAdded") if "metrics" in row else None,
-                "files_removed": row.get("metrics", {}).get("numFilesRemoved") if "metrics" in row else None,
-            }
+            if "metrics" in row and isinstance(row["metrics"], dict):
+                metric["optimize"] = {
+                    "files_added":   row["metrics"].get("numFilesAdded"),
+                    "files_removed": row["metrics"].get("numFilesRemoved"),
+                }
 
-        # VACUUM — delete old file versions. Spark prints removed-file
-        # counts to stdout; we don't parse them, just record duration.
-        spark.sql(
-            f"VACUUM {table} RETAIN {VACUUM_RETAIN_HOURS} HOURS"
-        ).collect()
+        spark.sql(f"VACUUM {table} RETAIN {VACUUM_RETAIN_HOURS} HOURS").collect()
 
         metric["duration_s"] = round(time.time() - table_start, 1)
         step_metrics[table] = metric
         print(f"✓ {table}: OPTIMIZE+VACUUM in {metric['duration_s']}s")
     except Exception as exc:
-        # Single-table failure shouldn't kill the whole maintenance pass —
-        # other tables can still benefit. Record the failure and continue.
-        # Overall pipeline status flips to 'failed' if ANY table errors.
         failed_table = table
         error_text = f"Failed on {table}: {exc}"
         metric["status"] = "error"
@@ -144,16 +179,11 @@ summary = f"{ok_count} OK, {err_count} errors, {skip_count} skipped in {elapsed:
 
 if err_count > 0:
     record_pipeline_run_finish(
-        run_id, "failed",
-        step_metrics=step_metrics,
-        error=error_text,
-        message=summary,
+        run_id, "failed", step_metrics=step_metrics, error=error_text, message=summary,
     )
 else:
     record_pipeline_run_finish(
-        run_id, "succeeded",
-        step_metrics=step_metrics,
-        message=summary,
+        run_id, "succeeded", step_metrics=step_metrics, message=summary,
     )
 
 print(f"\n=== delta_maintenance finished — {summary} ===")

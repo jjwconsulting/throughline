@@ -24,26 +24,146 @@
 
 # # Pipeline: weekly_full_refresh
 #
-# Global pipeline (multi-tenant). Identical to incremental_refresh except
-# uses `veeva_full_ingest` instead of incremental — pulls every Veeva
-# account/call/etc record fresh, catching:
+# Global pipeline. Same chain as incremental_refresh except uses
+# veeva_full_ingest. Catches deletes, late-arriving updates, and schema
+# additions that incremental misses under cursor-based sync.
 #
-#   - Soft-deletes the incremental cursor missed
-#   - Late-arriving updates whose modified_date predates last cursor
-#   - Schema additions on the Veeva side that incremental wouldn't surface
-#   - Anything else that drifts under cursor-based sync
+# Cadence: weekly Sunday 2am. Runs BEFORE delta_maintenance.
 #
-# Cadence: weekly Sunday 2am (set in Fabric workspace → Schedule).
-# Runs BEFORE delta_maintenance which is scheduled later Sunday morning.
+# SFTP omitted (no full vs incremental distinction; per-feed snapshot
+# vs incremental is managed via tenant_sftp_feed).
 #
-# SFTP ingest is omitted here — sales feeds don't have an "incremental
-# vs full" distinction the way Veeva does. SFTP rows accumulate via the
-# normal incremental pipeline and the snapshot/incremental cadence is
-# managed per-feed via tenant_sftp_feed.
+# Helpers below are inlined from the same shape used by every
+# orchestrator notebook — keep in sync if you edit one, edit all.
 
 # CELL ********************
 
-# MAGIC %run pipeline_config
+import json
+import time
+import traceback
+from datetime import datetime, timezone
+
+import requests
+
+SUPABASE_URL       = "https://zucvjyhnqsjuryqxgqzb.supabase.co"
+PIPELINE_RUN_TABLE = "pipeline_run"
+
+_secrets_path = "Files/secrets/pipeline_config.json"
+_secrets = json.loads(mssparkutils.fs.head(_secrets_path, 8192))
+SUPABASE_SERVICE_ROLE_KEY = _secrets["supabase_service_role_key"]
+
+_SUPABASE_HEADERS = {
+    "apikey":        SUPABASE_SERVICE_ROLE_KEY,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    "Content-Type":  "application/json",
+    "Prefer":        "return=representation",
+}
+
+
+def record_pipeline_run_start(kind, scope="global", tenant_id=None, triggered_by="schedule"):
+    payload = {
+        "kind": kind, "scope": scope, "tenant_id": tenant_id,
+        "status": "running", "triggered_by": triggered_by,
+    }
+    try:
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}",
+            headers=_SUPABASE_HEADERS, json=payload, timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()[0]["id"]
+    except Exception as exc:
+        print(f"⚠ pipeline_run start writeback failed: {exc}")
+        return None
+
+
+def record_pipeline_run_finish(run_id, status, step_metrics=None, error=None, message=None):
+    if not run_id:
+        return
+    payload = {
+        "status": status,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "step_metrics": json.dumps(step_metrics) if step_metrics else None,
+        "error": error, "message": message,
+    }
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}?id=eq.{run_id}",
+            headers=_SUPABASE_HEADERS, json=payload, timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"⚠ pipeline_run finish writeback failed: {exc}")
+
+
+def _update_pipeline_run_status(run_id, status):
+    if not run_id:
+        return
+    try:
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}?id=eq.{run_id}",
+            headers=_SUPABASE_HEADERS, json={"status": status}, timeout=30,
+        )
+        resp.raise_for_status()
+    except Exception as exc:
+        print(f"⚠ pipeline_run status update failed: {exc}")
+
+
+def run_step(step_name, timeout_s=600):
+    start = time.time()
+    try:
+        exit_value = mssparkutils.notebook.run(step_name, timeout_s)
+        duration = time.time() - start
+        print(f"✓ {step_name} OK in {duration:.1f}s — {exit_value}")
+        return {"status": "ok", "duration_s": round(duration, 1), "exit_value": str(exit_value)}
+    except Exception as exc:
+        duration = time.time() - start
+        print(f"✗ {step_name} FAILED after {duration:.1f}s — {exc}")
+        exc._step_metrics = {"status": "error", "duration_s": round(duration, 1), "error": str(exc)}
+        raise
+
+
+def run_orchestrator(pipeline_kind, steps, scope="global", tenant_id=None,
+                     triggered_by="schedule", step_timeout_s=600, pipeline_run_id=None):
+    print(f"=== {pipeline_kind} ({scope}) started ===")
+    pipeline_start = time.time()
+    if pipeline_run_id:
+        run_id = pipeline_run_id
+        _update_pipeline_run_status(run_id, "running")
+        print(f"using web-supplied pipeline_run_id: {run_id}")
+    else:
+        run_id = record_pipeline_run_start(
+            kind=pipeline_kind, scope=scope, tenant_id=tenant_id, triggered_by=triggered_by,
+        )
+
+    step_metrics = {}
+    try:
+        for step in steps:
+            print(f"\n→ Running {step}...")
+            step_metrics[step] = run_step(step, step_timeout_s)
+        elapsed = time.time() - pipeline_start
+        message = f"OK in {elapsed:.1f}s across {len(steps)} steps"
+        print(f"\n=== {pipeline_kind} finished — {message} ===")
+        record_pipeline_run_finish(run_id, "succeeded", step_metrics=step_metrics, message=message)
+        return message
+    except Exception as exc:
+        if hasattr(exc, "_step_metrics"):
+            failed_step = next((s for s in steps if s not in step_metrics), "unknown")
+            step_metrics[failed_step] = exc._step_metrics
+        elapsed = time.time() - pipeline_start
+        error_text = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        message = f"FAILED after {elapsed:.1f}s"
+        print(f"\n=== {pipeline_kind} {message} ===")
+        record_pipeline_run_finish(run_id, "failed", step_metrics=step_metrics,
+                                   error=error_text, message=message)
+        raise
+
+# METADATA ********************
+
+# META {
+# META   "language": "python",
+# META   "language_group": "synapse_pyspark"
+# META }
 
 # CELL ********************
 
@@ -76,7 +196,7 @@ run_orchestrator(
     scope="global",
     tenant_id=None,
     triggered_by="schedule",
-    step_timeout_s=1800,  # 30min — full Veeva ingest is the slow step
+    step_timeout_s=1800,
 )
 
 mssparkutils.notebook.exit("done")
