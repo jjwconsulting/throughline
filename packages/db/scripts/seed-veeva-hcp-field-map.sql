@@ -21,6 +21,13 @@ SELECT
 FROM tenant t
 CROSS JOIN (VALUES
   ('npi',                 'npi__v'),
+  -- Cross-system identifiers used by /admin/mappings upload's multi-field
+  -- resolution. Less commonly used for HCPs (NPI is the universal HCP
+  -- key), but present on Veeva account__v and worth pulling for
+  -- completeness so the same resolution path works whichever side an
+  -- admin's source file references.
+  ('network_id',          'network_id__v'),
+  ('dea_number',          'dea_number__v'),
   ('name',                'formatted_name__v'),
   ('first_name',          'first_name_cda__v'),
   ('last_name',           'last_name_cda__v'),

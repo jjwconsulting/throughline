@@ -56,7 +56,11 @@ ENTITY = "hcp"
 
 # Silver columns populated from the field map (in projection order).
 MAPPED_COLUMNS = [
-    "npi", "name", "first_name", "last_name", "middle_name",
+    # Cross-system identifiers. veeva_account_id is always set from the
+    # dedup key. NPI is universal for HCPs; Network ID is the canonical
+    # cross-system pharma master-data spine; DEA only for prescribers.
+    "npi", "network_id", "dea_number",
+    "name", "first_name", "last_name", "middle_name",
     "prefix", "suffix", "credentials",
     "specialty_primary", "specialty_secondary",
     "gender",
@@ -209,6 +213,14 @@ def build_group_select(
     bronze_schema = f"bronze_{slug_to_schema(tenant_slug)}"
     bronze_ref = f"{bronze_schema}.{bronze_table}"
 
+    # Introspect bronze schema once. Field-map entries whose bronze column
+    # isn't actually present in this tenant's source get downgraded to a
+    # NULL projection with a warning — keeps the build resilient when a
+    # tenant has a Veeva customization missing or when we add new optional
+    # identifier fields (network_id, dea_number, etc.) before every
+    # tenant has them populated.
+    bronze_columns = {f.name.lower() for f in spark.table(bronze_ref).schema.fields}
+
     # Veeva object name used for picklist lookups
     veeva_object = (
         bronze_table[len(prefix_strip):] if prefix_strip and bronze_table.startswith(prefix_strip)
@@ -218,7 +230,7 @@ def build_group_select(
     # Project: literals + (bronze_id) + each silver column.
     # For picklist columns: COALESCE(picklist_alias.label, raw_bronze_value).
     # For non-picklist mapped columns: pass through raw bronze value.
-    # For unmapped columns: NULL.
+    # For unmapped columns OR mapped-but-missing-in-bronze: NULL.
     projections = [
         f"  '{tenant_id}' AS tenant_id",
         f"  uuid() AS id",
@@ -227,7 +239,7 @@ def build_group_select(
     ]
     picklist_joins: list[str] = []
     for silver_col in MAPPED_COLUMNS:
-        if silver_col in col_map:
+        if silver_col in col_map and col_map[silver_col].lower() in bronze_columns:
             bronze_col = col_map[silver_col]
             if silver_col in PICKLIST_SILVER_COLUMNS:
                 alias = f"pl_{silver_col}"
@@ -244,6 +256,15 @@ def build_group_select(
             else:
                 projections.append(f"  ranked.`{bronze_col}` AS {silver_col}")
         else:
+            # Either no field-map entry, or the field-map points to a
+            # bronze column that doesn't exist in this tenant. Project NULL
+            # and warn loudly so the operator notices in the run log.
+            if silver_col in col_map:
+                print(
+                    f"  ⚠ {bronze_ref}: silver.{silver_col} mapped to "
+                    f"`{col_map[silver_col]}` which is missing from bronze — "
+                    f"projecting NULL."
+                )
             projections.append(f"  CAST(NULL AS STRING) AS {silver_col}")
     projections.append(f"  current_timestamp() AS silver_built_at")
 

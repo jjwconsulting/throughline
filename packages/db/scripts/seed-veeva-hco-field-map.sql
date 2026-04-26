@@ -26,6 +26,13 @@ CROSS JOIN (VALUES
   ('hospital_type',        'hospital_type__v'),
   ('hco_class',            'account_class__v'),
   ('account_group',        'account_group__v'),
+  -- Cross-system identifiers used by /admin/mappings upload's multi-field
+  -- resolution. Source-tenant variability: each Veeva tenant may have
+  -- different subsets of these populated. Silver build leaves NULLs
+  -- where the source field doesn't exist.
+  ('network_id',           'network_id__v'),
+  ('npi',                  'npi__v'),
+  ('dea_number',           'dea_number__v'),
   ('aha_id',               'aha__v'),
   ('bed_count',            'beds__c'),
   ('email',                'vt_hco_email__c'),

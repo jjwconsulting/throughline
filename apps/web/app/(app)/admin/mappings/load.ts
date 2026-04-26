@@ -7,7 +7,9 @@ import { queryFabric } from "@/lib/fabric";
 export type UnmappedAccount = {
   distributor_account_id: string;
   distributor_account_name: string | null;
+  account_city: string | null;
   account_state: string | null;
+  account_postal_code: string | null;
   rows: number;
   signed_units: number | null;
   signed_gross_dollars: number | null;
@@ -27,7 +29,9 @@ export async function loadUnmappedAccounts(
       `SELECT TOP 100
          distributor_account_id,
          MAX(distributor_account_name) AS distributor_account_name,
+         MAX(account_city) AS account_city,
          MAX(account_state) AS account_state,
+         MAX(account_postal_code) AS account_postal_code,
          COUNT(*) AS rows,
          ROUND(SUM(signed_units), 0) AS signed_units,
          ROUND(SUM(signed_gross_dollars), 0) AS signed_gross_dollars,

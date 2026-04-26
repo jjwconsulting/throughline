@@ -5,7 +5,9 @@ import {
   loadUnmappedAccounts,
   loadSavedAccountMappings,
 } from "./load";
+import { suggestForUnmapped } from "@/lib/mapping-suggestions";
 import AccountMappingRow from "./account-mapping-row";
+import CsvSection from "./csv-section";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,12 @@ export default async function AdminMappingsPage() {
     loadUnmappedAccounts(tenantId),
     loadSavedAccountMappings(tenantId),
   ]);
+
+  // Compute fuzzy suggestions per unmapped distributor (state-filtered name
+  // similarity + city/postal bonus). Cheap in-memory pass after one batched
+  // query of HCP+HCO names for the relevant states. Returns Map<id,
+  // SuggestionCandidate[]>; rows with no good suggestion get nothing.
+  const suggestions = await suggestForUnmapped(tenantId, unmapped);
 
   return (
     <div className="space-y-6">
@@ -55,6 +63,8 @@ export default async function AdminMappingsPage() {
           to the right HCP/HCO and roll up by territory.
         </p>
       </div>
+
+      <CsvSection />
 
       {/* Primary surface: unmapped accounts that need attention */}
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
@@ -95,7 +105,11 @@ export default async function AdminMappingsPage() {
             </thead>
             <tbody>
               {unmapped.map((u) => (
-                <AccountMappingRow key={u.distributor_account_id} row={u} />
+                <AccountMappingRow
+                  key={u.distributor_account_id}
+                  row={u}
+                  suggestions={suggestions.get(u.distributor_account_id) ?? []}
+                />
               ))}
             </tbody>
           </table>

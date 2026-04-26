@@ -44,7 +44,14 @@ spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   hco_key               STRING    NOT NULL,
   tenant_id             STRING    NOT NULL,
+  -- Identifier columns. veeva_account_id is the CRM record id (always
+  -- present); network_id, npi, dea_number, aha_id, tax_id are nullable
+  -- alternates used by the mapping uploader's multi-field resolution to
+  -- accept distributor↔Veeva files keyed off any of these.
   veeva_account_id      STRING    NOT NULL,
+  network_id            STRING,
+  npi                   STRING,
+  dea_number            STRING,
   source_system         STRING    NOT NULL,
   name                  STRING,
   hco_type              STRING,
@@ -86,6 +93,9 @@ SELECT
   md5(concat_ws('|', tenant_id, veeva_account_id))  AS hco_key,
   tenant_id,
   veeva_account_id,
+  network_id,
+  npi,
+  dea_number,
   source_system,
   name,
   hco_type,

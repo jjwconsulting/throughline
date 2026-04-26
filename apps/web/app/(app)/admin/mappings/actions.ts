@@ -178,6 +178,392 @@ export async function saveAccountMappingAction(
 }
 
 // ---------------------------------------------------------------------------
+// CSV upload action — bulk account_xref mappings.
+//
+// Two header shapes supported:
+//   1. Default template — distributor_account_id, distributor_account_name,
+//      veeva_account_id (case-insensitive).
+//   2. Arbitrary file — when the client uploader provides explicit column
+//      overrides via FormData fields (col_distributor_account_id,
+//      col_distributor_account_name, col_veeva_account_id), those header
+//      names are looked up in the file instead. Lets transitioning clients
+//      drop in their existing mapping files without reformatting.
+//
+// Per-row validation: veeva_account_id must exist in dim_hcp ∪ dim_hco.
+// Distributor IDs aren't constrained to currently-unmapped — admin can
+// pre-load mappings for IDs not yet seen in fact_sale (matches the goals
+// CSV pattern: bulk for day-1 setup).
+// ---------------------------------------------------------------------------
+
+// Field labels for the resolution-source breakdown surfaced in the UI.
+// Order matters: same as the resolution priority below.
+const RESOLUTION_FIELD_LABELS = {
+  veeva_account_id: "Veeva CRM Account ID",
+  network_id: "Veeva Network ID",
+  npi: "NPI",
+  dea_number: "DEA #",
+  aha_id: "AHA ID",
+} as const;
+
+type ResolutionField = keyof typeof RESOLUTION_FIELD_LABELS;
+
+export type UploadMappingsState = {
+  saved: number;
+  rowResults: { line: number; status: "ok" | "error"; message: string }[];
+  // Per-field count of how many rows resolved via each candidate ID
+  // column. Tells the admin "your file uses Network ID by convention" at
+  // a glance — implicit configuration without a separate setting.
+  resolutionBreakdown?: { field: ResolutionField; label: string; count: number }[];
+};
+
+export async function uploadMappingsAction(
+  _prev: UploadMappingsState,
+  formData: FormData,
+): Promise<UploadMappingsState> {
+  const empty: UploadMappingsState = { saved: 0, rowResults: [] };
+
+  const { resolution } = await getCurrentScope();
+  if (
+    !resolution?.ok ||
+    (resolution.scope.role !== "admin" && resolution.scope.role !== "bypass")
+  ) {
+    return {
+      ...empty,
+      rowResults: [{ line: 0, status: "error", message: "Not authorized" }],
+    };
+  }
+  const tenantId = resolution.scope.tenantId;
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return {
+      ...empty,
+      rowResults: [{ line: 0, status: "error", message: "No file selected" }],
+    };
+  }
+  if (file.size > 5_000_000) {
+    return {
+      ...empty,
+      rowResults: [
+        { line: 0, status: "error", message: "File too large (max 5MB)" },
+      ],
+    };
+  }
+
+  const text = await file.text();
+  const rows = parseCsv(text);
+  if (rows.length === 0) {
+    return {
+      ...empty,
+      rowResults: [{ line: 0, status: "error", message: "Empty file" }],
+    };
+  }
+
+  const header = rows[0]!.map((h) => h.toLowerCase().trim());
+
+  // Optional explicit overrides from the smart uploader (column-mapper UI).
+  // When present, locate the named header from the user's file. When
+  // absent, fall back to the default template names.
+  const overrideDistributor = String(
+    formData.get("col_distributor_account_id") ?? "",
+  )
+    .toLowerCase()
+    .trim();
+  const overrideDistributorName = String(
+    formData.get("col_distributor_account_name") ?? "",
+  )
+    .toLowerCase()
+    .trim();
+  const overrideVeeva = String(formData.get("col_veeva_account_id") ?? "")
+    .toLowerCase()
+    .trim();
+
+  const idx = {
+    distributor: overrideDistributor
+      ? header.indexOf(overrideDistributor)
+      : header.indexOf("distributor_account_id"),
+    distributorName: overrideDistributorName
+      ? header.indexOf(overrideDistributorName)
+      : header.indexOf("distributor_account_name"),
+    veeva: overrideVeeva
+      ? header.indexOf(overrideVeeva)
+      : header.indexOf("veeva_account_id"),
+  };
+  if (idx.distributor < 0 || idx.veeva < 0) {
+    const expected =
+      overrideDistributor || overrideVeeva
+        ? `distributor_account_id ↔ "${overrideDistributor || "(unmapped)"}", veeva_account_id ↔ "${overrideVeeva || "(unmapped)"}"`
+        : "distributor_account_id, veeva_account_id (distributor_account_name optional)";
+    return {
+      ...empty,
+      rowResults: [
+        {
+          line: 1,
+          status: "error",
+          message: `Could not locate required column(s) in file. Expected: ${expected}.`,
+        },
+      ],
+    };
+  }
+
+  // Collect every distinct value the admin put in the veeva_account_id
+  // column across all rows. We try to resolve each value across multiple
+  // candidate ID columns (veeva_account_id, network_id, npi, dea_number,
+  // aha_id) so transitioning clients can drop in a file keyed off
+  // whichever ID their predecessor used. Two bulk queries (HCP + HCO),
+  // not N round-trips.
+  const candidateValues = new Set<string>();
+  for (let i = 1; i < rows.length; i++) {
+    const v = (rows[i]?.[idx.veeva] ?? "").trim();
+    if (v) candidateValues.add(v);
+  }
+
+  // Resolution map: user's value → { veeva_account_id (canonical), field
+  // that matched }. If the user gave an NPI, we look it up in dim_hcp/hco
+  // and store the canonical CRM account id as the resolved target.
+  const resolved = new Map<string, { veevaAccountId: string; field: ResolutionField }>();
+
+  if (candidateValues.size > 0) {
+    const sanitized = Array.from(candidateValues)
+      .map((v) => `'${v.replace(/'/g, "''")}'`)
+      .join(",");
+
+    // Pull every candidate ID column in one shot per dim. Order in the
+    // priority loop below determines which field "wins" if two dim rows
+    // happen to claim the same string value via different fields (rare).
+    const [hcoRows, hcpRows] = await Promise.all([
+      queryFabric<{
+        veeva_account_id: string;
+        network_id: string | null;
+        npi: string | null;
+        dea_number: string | null;
+        aha_id: string | null;
+      }>(
+        tenantId,
+        `SELECT veeva_account_id, network_id, npi, dea_number, aha_id
+         FROM gold.dim_hco
+         WHERE tenant_id = @tenantId
+           AND ( veeva_account_id IN (${sanitized})
+              OR network_id       IN (${sanitized})
+              OR npi              IN (${sanitized})
+              OR dea_number       IN (${sanitized})
+              OR aha_id           IN (${sanitized}) )`,
+      ),
+      queryFabric<{
+        veeva_account_id: string;
+        network_id: string | null;
+        npi: string | null;
+        dea_number: string | null;
+      }>(
+        tenantId,
+        `SELECT veeva_account_id, network_id, npi, dea_number
+         FROM gold.dim_hcp
+         WHERE tenant_id = @tenantId
+           AND ( veeva_account_id IN (${sanitized})
+              OR network_id       IN (${sanitized})
+              OR npi              IN (${sanitized})
+              OR dea_number       IN (${sanitized}) )`,
+      ),
+    ]);
+
+    // Walk priority order. First field to claim a user value wins so a
+    // single distributor row doesn't double-resolve.
+    const claim = (
+      value: string | null,
+      veevaAccountId: string,
+      field: ResolutionField,
+    ) => {
+      if (!value) return;
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      if (!candidateValues.has(trimmed)) return;
+      if (resolved.has(trimmed)) return;
+      resolved.set(trimmed, { veevaAccountId, field });
+    };
+    // Priority: native veeva_account_id first (cheapest reference, most
+    // common from our own template). Then Network ID (canonical
+    // cross-system), then NPI (universal HCP key), then DEA, then AHA.
+    for (const r of hcoRows) claim(r.veeva_account_id, r.veeva_account_id, "veeva_account_id");
+    for (const r of hcpRows) claim(r.veeva_account_id, r.veeva_account_id, "veeva_account_id");
+    for (const r of hcoRows) claim(r.network_id, r.veeva_account_id, "network_id");
+    for (const r of hcpRows) claim(r.network_id, r.veeva_account_id, "network_id");
+    for (const r of hcoRows) claim(r.npi, r.veeva_account_id, "npi");
+    for (const r of hcpRows) claim(r.npi, r.veeva_account_id, "npi");
+    for (const r of hcoRows) claim(r.dea_number, r.veeva_account_id, "dea_number");
+    for (const r of hcpRows) claim(r.dea_number, r.veeva_account_id, "dea_number");
+    for (const r of hcoRows) claim(r.aha_id, r.veeva_account_id, "aha_id");
+  }
+
+  const breakdownCounts: Record<ResolutionField, number> = {
+    veeva_account_id: 0,
+    network_id: 0,
+    npi: 0,
+    dea_number: 0,
+    aha_id: 0,
+  };
+
+  const results: UploadMappingsState["rowResults"] = [];
+  let saved = 0;
+  const updatedBy = resolution.scope.role;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i]!;
+    const lineNum = i + 1;
+    const distributorId = (row[idx.distributor] ?? "").trim();
+    const distributorName =
+      idx.distributorName >= 0
+        ? (row[idx.distributorName] ?? "").trim()
+        : "";
+    const veevaId = (row[idx.veeva] ?? "").trim();
+
+    if (!distributorId && !veevaId) continue; // blank line
+
+    if (!distributorId) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: "Missing distributor_account_id",
+      });
+      continue;
+    }
+    if (!veevaId) {
+      // Empty veeva_account_id is a deliberate skip in the template — admin
+      // hasn't filled this row in yet. Quiet result, not an error.
+      continue;
+    }
+    const match = resolved.get(veevaId);
+    if (!match) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `Value "${veevaId}" not found in dim_hcp/dim_hco via veeva_account_id, network_id, npi, dea_number, or aha_id`,
+      });
+      continue;
+    }
+    breakdownCounts[match.field] += 1;
+    // Always store the canonical veeva_account_id (CRM record id) as the
+    // mapping target — keeps the gold.fact_sale build's account_xref join
+    // consistent regardless of which field the admin's file referenced.
+    const canonicalVeevaId = match.veevaAccountId;
+    const matchedVia =
+      match.field === "veeva_account_id"
+        ? ""
+        : ` (via ${RESOLUTION_FIELD_LABELS[match.field]})`;
+
+    const notes = distributorName
+      ? `${distributorName} → ${canonicalVeevaId}${matchedVia}`
+      : `→ ${canonicalVeevaId}${matchedVia}`;
+
+    try {
+      const existing = await db
+        .select({ id: schema.mapping.id })
+        .from(schema.mapping)
+        .where(
+          and(
+            eq(schema.mapping.tenantId, tenantId),
+            eq(schema.mapping.kind, "account_xref"),
+            eq(schema.mapping.sourceKey, distributorId),
+          ),
+        )
+        .limit(1);
+
+      if (existing[0]) {
+        await db
+          .update(schema.mapping)
+          .set({
+            targetValue: canonicalVeevaId,
+            notes,
+            updatedBy,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.mapping.id, existing[0].id));
+      } else {
+        await db.insert(schema.mapping).values({
+          tenantId,
+          kind: "account_xref",
+          sourceKey: distributorId,
+          targetValue: canonicalVeevaId,
+          notes,
+          effectiveFrom: new Date(),
+          updatedBy,
+        });
+      }
+      saved += 1;
+      results.push({
+        line: lineNum,
+        status: "ok",
+        message: `${distributorId} → ${canonicalVeevaId}${matchedVia}`,
+      });
+    } catch (err) {
+      results.push({
+        line: lineNum,
+        status: "error",
+        message: `DB error: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  if (saved > 0) revalidatePath("/admin/mappings");
+
+  // Per-field breakdown — empty buckets dropped so the UI only shows
+  // fields that actually contributed.
+  const resolutionBreakdown = (
+    Object.keys(breakdownCounts) as ResolutionField[]
+  )
+    .filter((f) => breakdownCounts[f] > 0)
+    .map((f) => ({
+      field: f,
+      label: RESOLUTION_FIELD_LABELS[f],
+      count: breakdownCounts[f],
+    }));
+
+  return { saved, rowResults: results, resolutionBreakdown };
+}
+
+// Tiny CSV parser. Same shape as the goals upload — handles BOM, mixed
+// CRLF/LF, quoted fields with embedded commas, and "#" comment lines used
+// in templates.
+function parseCsv(text: string): string[][] {
+  const stripBom = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const lines = stripBom.split(/\r?\n/);
+  const rows: string[][] = [];
+  for (const raw of lines) {
+    if (raw.length === 0) continue;
+    if (raw.startsWith("#")) continue;
+    rows.push(splitCsvLine(raw));
+  }
+  return rows;
+}
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (inQuotes) {
+      if (c === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (c === '"') {
+        inQuotes = false;
+      } else {
+        cur += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Delete a saved mapping.
 // ---------------------------------------------------------------------------
 

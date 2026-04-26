@@ -6,6 +6,11 @@ import {
   loadTopHcps,
   loadTopHcos,
 } from "@/lib/interactions";
+import {
+  loadSalesKpis,
+  loadSalesTrend,
+  loadTopUnmappedDistributors,
+} from "@/lib/sales";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
 import {
@@ -29,6 +34,15 @@ export const dynamic = "force-dynamic";
 
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+// Compact dollars: $1.2M / $345K / $87. Used in sales KPIs + trend axis.
+function formatCompactDollars(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${Math.round(abs)}`;
 }
 
 function deltaLabel(current: number, prior: number): string | null {
@@ -75,23 +89,38 @@ export default async function Dashboard({
       })
     : Promise.resolve(null);
 
-  const [kpis, trend, topReps, topHcps, topHcos, inactivitySignals, periodGoal] =
-    await Promise.all([
-      loadInteractionKpis(tenantId, filters, rlsScope),
-      loadTrend(tenantId, filters, rlsScope),
-      loadTopReps(tenantId, filters, rlsScope),
-      showHcos
-        ? Promise.resolve([])
-        : loadTopHcps(tenantId, filters, rlsScope),
-      showHcos
-        ? loadTopHcos(tenantId, filters, rlsScope)
-        : Promise.resolve([]),
-      // Signals are NOT filter-scoped — they always reflect "what needs
-      // attention right now," regardless of which time window the rest of
-      // the dashboard is showing.
-      loadHcpInactivitySignals(tenantId, rlsScope),
-      goalLookup,
-    ]);
+  const [
+    kpis,
+    trend,
+    topReps,
+    topHcps,
+    topHcos,
+    inactivitySignals,
+    periodGoal,
+    salesKpis,
+    salesTrend,
+    topUnmapped,
+  ] = await Promise.all([
+    loadInteractionKpis(tenantId, filters, rlsScope),
+    loadTrend(tenantId, filters, rlsScope),
+    loadTopReps(tenantId, filters, rlsScope),
+    showHcos
+      ? Promise.resolve([])
+      : loadTopHcps(tenantId, filters, rlsScope),
+    showHcos
+      ? loadTopHcos(tenantId, filters, rlsScope)
+      : Promise.resolve([]),
+    // Signals are NOT filter-scoped — they always reflect "what needs
+    // attention right now," regardless of which time window the rest of
+    // the dashboard is showing.
+    loadHcpInactivitySignals(tenantId, rlsScope),
+    goalLookup,
+    // Sales loaders are tenant-wide (no rep RLS — fact_sale has no
+    // owner_user_key today). See lib/sales.ts header.
+    loadSalesKpis(tenantId, filters),
+    loadSalesTrend(tenantId, filters),
+    loadTopUnmappedDistributors(tenantId, filters, 10),
+  ]);
 
   const period = periodLabel(filters.range);
   const interactionLabel =
@@ -113,6 +142,16 @@ export default async function Dashboard({
       : filters.range === "all"
         ? null
         : deltaLabel(kpis.calls_period, kpis.calls_prior);
+  // Sales card: skip the delta when sales data isn't present (cold start
+  // before pipeline runs, or filter window with zero sales). Treat all-time
+  // (no prior) as no-delta too.
+  const salesDelta =
+    filters.range !== "all" && salesKpis.net_gross_dollars_prior !== 0
+      ? deltaLabel(
+          salesKpis.net_gross_dollars_period,
+          salesKpis.net_gross_dollars_prior,
+        )
+      : null;
   const cards: { label: string; value: string; delta: string | null }[] = [
     {
       label: `${interactionLabel} (${period})`,
@@ -121,6 +160,11 @@ export default async function Dashboard({
     },
     { label: `${reachLabel} (${period})`, value: reachValue, delta: null },
     { label: `Active reps (${period})`, value: formatNumber(kpis.reps), delta: null },
+    {
+      label: `Net sales (${period})`,
+      value: formatCompactDollars(salesKpis.net_gross_dollars_period),
+      delta: salesDelta,
+    },
   ];
 
   return (
@@ -137,7 +181,7 @@ export default async function Dashboard({
 
       <div className="space-y-3">
         <AccountToggle value={filters.account} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {cards.map((c) => (
             <div
               key={c.label}
@@ -176,6 +220,38 @@ export default async function Dashboard({
                   ? "mo"
                   : "qtr"
             }
+          />
+        </div>
+      </div>
+
+      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+        <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="font-display text-lg">
+              Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+            </h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+              most recent {filters.granularity}
+              {chartBuckets(filters) === 1 ? "" : "s"}
+            </p>
+          </div>
+          {salesKpis.accounts_unmapped > 0 ? (
+            <Link
+              href="/admin/mappings"
+              className="text-xs text-[var(--color-primary)] hover:underline"
+            >
+              {salesKpis.accounts_unmapped} unmapped distributor
+              {salesKpis.accounts_unmapped === 1 ? "" : "s"} →
+            </Link>
+          ) : null}
+        </div>
+        <div className="px-2 py-4">
+          <TrendChart
+            data={salesTrend}
+            valueKey="net_dollars"
+            valueLabel="Net sales"
+            format="dollars"
           />
         </div>
       </div>
@@ -319,6 +395,74 @@ export default async function Dashboard({
           )}
         </div>
       </div>
+
+      {topUnmapped.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="font-display text-lg">
+                Top distributors (unmapped)
+              </h2>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                Highest-$ distributor accounts in {period} with no Veeva
+                mapping yet. Mapping these makes their sales roll up into
+                HCP / HCO views.
+              </p>
+            </div>
+            <Link
+              href="/admin/mappings"
+              className="text-sm text-[var(--color-primary)] hover:underline whitespace-nowrap"
+            >
+              Map distributors →
+            </Link>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">
+                  Distributor ID
+                </th>
+                <th className="text-left font-normal px-5 py-2">Name</th>
+                <th className="text-left font-normal px-5 py-2">State</th>
+                <th className="text-right font-normal px-5 py-2">Net sales</th>
+                <th className="text-right font-normal px-5 py-2">Rows</th>
+                <th className="text-right font-normal px-5 py-2">Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topUnmapped.map((d, i) => (
+                <tr
+                  key={d.distributor_account_id}
+                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                >
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {i + 1}
+                  </td>
+                  <td className="px-5 py-2 font-mono text-xs">
+                    {d.distributor_account_id}
+                  </td>
+                  <td className="px-5 py-2">
+                    {d.distributor_account_name ?? "—"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {d.account_state ?? "—"}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono">
+                    {formatCompactDollars(d.net_gross_dollars)}
+                  </td>
+                  <td className="px-5 py-2 text-right text-[var(--color-ink-muted)]">
+                    {formatNumber(d.rows)}
+                  </td>
+                  <td className="px-5 py-2 text-right text-[var(--color-ink-muted)]">
+                    {d.last_seen ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="text-center text-xs text-[var(--color-ink-muted)] pt-4">
         Need deeper analysis?{" "}

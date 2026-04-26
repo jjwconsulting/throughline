@@ -42,6 +42,12 @@ ENTITY = "hco"
 MAPPED_COLUMNS = [
     "name",
     "hco_type", "hospital_type", "hco_class", "account_group",
+    # Cross-system identifiers (alternates to veeva_account_id, which is
+    # always set from the dedup key). Nullable; populated only when the
+    # source Veeva tenant has the field. Network ID is the canonical
+    # cross-system key in pharma master data — many transitioning clients
+    # use it as their mapping-file join key instead of the CRM Account ID.
+    "network_id", "npi", "dea_number",
     "aha_id", "bed_count",
     "email", "phone_office",
     "city", "state", "postal_code", "country",
@@ -180,6 +186,14 @@ def build_group_select(
 
     bronze_schema = f"bronze_{slug_to_schema(tenant_slug)}"
     bronze_ref = f"{bronze_schema}.{bronze_table}"
+
+    # Introspect bronze schema once. Field-map entries pointing to a
+    # bronze column that doesn't exist in this tenant's source get
+    # downgraded to NULL projection with a warning — keeps the build
+    # resilient when adding optional identifier fields (network_id,
+    # dea_number) before every tenant has them.
+    bronze_columns = {f.name.lower() for f in spark.table(bronze_ref).schema.fields}
+
     veeva_object = (
         bronze_table[len(prefix_strip):]
         if prefix_strip and bronze_table.startswith(prefix_strip)
@@ -194,7 +208,7 @@ def build_group_select(
     ]
     picklist_joins: list[str] = []
     for silver_col in MAPPED_COLUMNS:
-        if silver_col in col_map:
+        if silver_col in col_map and col_map[silver_col].lower() in bronze_columns:
             bronze_col = col_map[silver_col]
             if silver_col in PICKLIST_SILVER_COLUMNS:
                 alias = f"pl_{silver_col}"
@@ -211,6 +225,12 @@ def build_group_select(
             else:
                 projections.append(f"  ranked.`{bronze_col}` AS {silver_col}")
         else:
+            if silver_col in col_map:
+                print(
+                    f"  ⚠ {bronze_ref}: silver.{silver_col} mapped to "
+                    f"`{col_map[silver_col]}` which is missing from bronze — "
+                    f"projecting NULL."
+                )
             projections.append(f"  CAST(NULL AS STRING) AS {silver_col}")
     projections.append(f"  current_timestamp() AS silver_built_at")
 

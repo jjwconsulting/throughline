@@ -13,10 +13,23 @@ const initialSave: SaveMappingState = { error: null, success: null };
 export type UnmappedRowProps = {
   distributor_account_id: string;
   distributor_account_name: string | null;
+  account_city?: string | null;
   account_state: string | null;
+  account_postal_code?: string | null;
   rows: number;
   signed_gross_dollars: number | null;
   last_seen: string | null;
+};
+
+export type SuggestionPill = {
+  veeva_account_id: string;
+  account_type: "HCP" | "HCO";
+  name: string;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  detail: string | null;
+  score: number;
 };
 
 // Per-unmapped-row component. Renders the row + a collapsible search-and-pick
@@ -24,8 +37,13 @@ export type UnmappedRowProps = {
 // without cross-talk.
 export default function AccountMappingRow({
   row,
+  suggestions = [],
 }: {
   row: UnmappedRowProps;
+  // Top fuzzy-name suggestions (state-filtered). Empty when nothing scored
+  // above the confidence threshold. Lighter framing than "recommendations":
+  // just a starting point; admin still owns the final pick.
+  suggestions?: SuggestionPill[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(row.distributor_account_name ?? "");
@@ -53,9 +71,58 @@ export default function AccountMappingRow({
         </td>
         <td className="px-4 py-3">
           <div className="font-medium">{row.distributor_account_name ?? "—"}</div>
-          {row.account_state ? (
+          {row.account_city || row.account_state ? (
             <div className="text-xs text-[var(--color-ink-muted)]">
-              {row.account_state}
+              {[row.account_city, row.account_state].filter(Boolean).join(", ")}
+            </div>
+          ) : null}
+          {suggestions.length > 0 && !saveState.success ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-[var(--color-ink-muted)] self-center">
+                Suggested:
+              </span>
+              {suggestions.map((s) => (
+                <form
+                  key={s.veeva_account_id}
+                  action={saveAction}
+                  className="inline"
+                >
+                  <input
+                    type="hidden"
+                    name="distributor_account_id"
+                    value={row.distributor_account_id}
+                  />
+                  <input
+                    type="hidden"
+                    name="distributor_account_name"
+                    value={row.distributor_account_name ?? ""}
+                  />
+                  <input
+                    type="hidden"
+                    name="veeva_account_id"
+                    value={s.veeva_account_id}
+                  />
+                  <input
+                    type="hidden"
+                    name="veeva_account_name"
+                    value={s.name}
+                  />
+                  <button
+                    type="submit"
+                    disabled={savePending}
+                    title={`${s.name} (${s.account_type}${s.city || s.state ? " · " + [s.city, s.state].filter(Boolean).join(", ") : ""}) — ${Math.round(s.score * 100)}% match. Click to map.`}
+                    className="text-xs rounded border border-[var(--color-border)] bg-white px-2 py-0.5 hover:bg-[var(--color-positive)]/10 hover:border-[var(--color-positive)] disabled:opacity-50"
+                  >
+                    <span className="text-[var(--color-ink-muted)] mr-1">
+                      {s.account_type}
+                    </span>
+                    {s.name}
+                    <span className="text-[var(--color-ink-muted)] ml-1">
+                      ≈{Math.round(s.score * 100)}%
+                    </span>
+                  </button>
+                </form>
+              ))}
             </div>
           ) : null}
         </td>

@@ -42,7 +42,14 @@ spark.sql(f"""
 CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   hcp_key              STRING    NOT NULL,
   tenant_id            STRING    NOT NULL,
+  -- Identifier columns. veeva_account_id is the CRM record id (always
+  -- present); network_id, npi, dea_number are nullable alternates used by
+  -- the mapping uploader's multi-field resolution. NPI is universal for
+  -- HCPs; Network ID is the canonical cross-system pharma master-data
+  -- spine; DEA only for prescribers of controlled substances.
   veeva_account_id     STRING    NOT NULL,
+  network_id           STRING,
+  dea_number           STRING,
   source_system        STRING    NOT NULL,
   npi                  STRING,
   name                 STRING,
@@ -82,6 +89,8 @@ SELECT
   md5(concat_ws('|', tenant_id, veeva_account_id))  AS hcp_key,
   tenant_id,
   veeva_account_id,
+  network_id,
+  dea_number,
   source_system,
   npi,
   name,
