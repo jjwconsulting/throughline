@@ -176,7 +176,10 @@ def run_orchestrator(pipeline_kind, steps, scope="global", tenant_id=None,
 # CELL ********************
 
 # Parameter cell — overridable by the Fabric REST API trigger via
-# executionData.parameters. Defaults apply on standalone runs.
+# executionData.parameters. The "parameters" tag below is what tells
+# Fabric this cell is the param injection point. DO NOT edit this cell
+# in the Fabric editor — Fabric strips the tag on save and breaks the
+# web → notebook handoff. Edit only via git.
 pipeline_run_id = None
 tenant_id = None
 triggered_by = "schedule"
@@ -185,7 +188,8 @@ triggered_by = "schedule"
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark"
+# META   "language_group": "synapse_pyspark",
+# META   "tags": ["parameters"]
 # META }
 
 # CELL ********************
