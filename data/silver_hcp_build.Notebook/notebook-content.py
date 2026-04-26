@@ -23,10 +23,8 @@
 # MARKDOWN ********************
 
 # # Silver build: hcp
-#
 # Builds `silver.hcp` (one row per Veeva account that's a person) from
 # bronze Veeva account__v tables across all enabled tenants.
-#
 # Pattern is identical to `silver_account_xref_build`:
 #   - Read `config.tenant_source_field_map` filtered to silver_table='hcp'
 #   - Group by (tenant, source_system, bronze_table)
@@ -37,17 +35,15 @@
 #       3. projects bronze columns into silver columns per the field map
 #       4. NULLs unmapped silver columns
 #   - UNION ALL across groups, write to silver.hcp (overwrite)
-#
 # Concerns split:
 #   - Entity shape (silver columns, dedup key, source filters): hardcoded
 #     in this notebook — different silver entities have different rules
 #   - Field-level routing (bronze col -> silver col): from field map
-#
 # Source-specific assumptions hardcoded here:
 #   veeva: HCP = ispersonaccount__v = 'true'; dedup by id, modified_date__v
-#
 # Other source systems (e.g. salesforce) would need their own discriminator
 # and dedup keys added to SOURCE_RULES below when we ingest from them.
+
 
 # CELL ********************
 

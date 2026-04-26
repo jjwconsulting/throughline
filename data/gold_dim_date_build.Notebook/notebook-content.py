@@ -23,20 +23,16 @@
 # MARKDOWN ********************
 
 # # Gold build: dim_date
-#
 # Generated calendar dimension. One row per day from `START_DATE` to
 # `END_DATE`. Tenant-agnostic — same dates apply to all tenants.
-#
 # `date_key` is YYYYMMDD as INT, suitable for fact table FKs joining on a
 # stable integer (faster than date joins, immune to timezone drift).
-#
 # Includes basic calendar attributes, US fiscal-year columns, US federal
 # holiday data, and `today()`-relative columns. The relative columns
 # (`relative_day`, `relative_quarter`, `is_business_day` etc.) are
 # pre-computed so Direct Lake doesn't fall back to DirectQuery on filters
 # like "current quarter" or "last 13 weeks" — must run **daily** to stay
 # current.
-#
 # Adjust `FISCAL_YEAR_START_MONTH` if a tenant uses a non-calendar fiscal
 # year (move to per-tenant config when this becomes a real ask).
 
@@ -62,8 +58,7 @@ HOLIDAY_END_YEAR   = 2030
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

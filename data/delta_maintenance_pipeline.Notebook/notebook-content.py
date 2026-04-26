@@ -23,17 +23,13 @@
 # MARKDOWN ********************
 
 # # Pipeline: delta_maintenance
-#
-# Global pipeline. Periodic delta-table housekeeping:
+# # Global pipeline. Periodic delta-table housekeeping:
 #   - OPTIMIZE              compacts small files into larger ones
 #   - VACUUM RETAIN 168     removes file versions older than 7 days
-#
-# Cadence: weekly Sunday ~4am, AFTER weekly_full_refresh.
-#
-# Doesn't use run_orchestrator since the unit of work is a SQL command
+# # Cadence: weekly Sunday ~4am, AFTER weekly_full_refresh.
+# # Doesn't use run_orchestrator since the unit of work is a SQL command
 # per table, not a child notebook. Records its own pipeline_run row.
-#
-# Helpers below are inlined from the same shape used by every
+# # Helpers below are inlined from the same shape used by every
 # orchestrator notebook — keep in sync if you edit one, edit all.
 
 # CELL ********************

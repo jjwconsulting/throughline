@@ -23,18 +23,15 @@
 # MARKDOWN ********************
 
 # # Silver build: sale
-#
 # Builds `silver.sale` from per-tenant bronze sales tables. One row per
 # distributor sales transaction line, daily grain. No dedup (each row IS
 # the transaction; idempotency is the source's responsibility).
-#
 # Field-map driven via `config.tenant_source_field_map` — same pattern as
 # silver.call. The map handles WHICH bronze column goes where; the type
 # casts (date parsing, dollar stripping, numeric coercion) are applied
 # uniformly here based on the canonical silver column name. Source-format
 # differences (Fennec IntegriChain "$35,963.82" vs TriSalus raw numbers)
 # are absorbed by safe CAST expressions that handle both shapes.
-#
 # Account RESOLUTION (distributor_account_id → veeva account_key) does NOT
 # happen here — silver keeps raw distributor IDs. Resolution happens in the
 # gold build by LEFT JOINing silver.account_xref. Unmapped rows survive to
@@ -103,8 +100,7 @@ DEFAULT_TRANSACTION_TYPE = "SALES"
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

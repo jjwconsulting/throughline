@@ -23,10 +23,8 @@
 # MARKDOWN ********************
 
 # # Gold build: fact_call
-#
 # Central pharma fact: one row per call event. Built from `silver.call` with
 # foreign keys resolved into surrogate dim keys for clean star-schema joins.
-#
 # FK resolution:
 #   - account → dim_hcp (person accounts) AND dim_hco (organization accounts).
 #     The two are mutually exclusive per row: a call hits exactly one of the
@@ -35,18 +33,16 @@
 #     both keys NULL.
 #   - owner_user, attributed_user → dim_user
 #   - call_date → dim_date
-#
 # Both `owner_user_key` and `attributed_user_key` populated. PBI sets up
 # two relationships from fact_call → dim_user; reports use USERELATIONSHIP()
 # to swap perspectives ("rep credit" vs "record owner").
-#
 # Skips territory FK for v1 — that needs SCD2 user_territory for
 # point-in-time accuracy. Reports drag dim_user → silver.user_territory →
 # silver.territory in PBI for current-state attribution. Promote to gold
 # when SCD2 lands.
-#
 # Measures: call_count (always 1; PBI sums) + duration_minutes (cast from
 # silver string).
+
 
 # CELL ********************
 

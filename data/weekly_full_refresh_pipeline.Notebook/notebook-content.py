@@ -23,17 +23,13 @@
 # MARKDOWN ********************
 
 # # Pipeline: weekly_full_refresh
-#
-# Global pipeline. Same chain as incremental_refresh except uses
+# # Global pipeline. Same chain as incremental_refresh except uses
 # veeva_full_ingest. Catches deletes, late-arriving updates, and schema
 # additions that incremental misses under cursor-based sync.
-#
-# Cadence: weekly Sunday 2am. Runs BEFORE delta_maintenance.
-#
-# SFTP omitted (no full vs incremental distinction; per-feed snapshot
+# # Cadence: weekly Sunday 2am. Runs BEFORE delta_maintenance.
+# # SFTP omitted (no full vs incremental distinction; per-feed snapshot
 # vs incremental is managed via tenant_sftp_feed).
-#
-# Helpers below are inlined from the same shape used by every
+# # Helpers below are inlined from the same shape used by every
 # orchestrator notebook — keep in sync if you edit one, edit all.
 
 # CELL ********************

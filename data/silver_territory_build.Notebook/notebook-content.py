@@ -23,7 +23,6 @@
 # MARKDOWN ********************
 
 # # Silver build: territory
-#
 # Tiny table (~50 rows in fennec) but foundational. Sales territories that
 # users are assigned to and that calls/HCPs roll up into. Hierarchy via
 # `parent_territory_id`.
@@ -54,8 +53,7 @@ SOURCE_RULES: dict[str, dict[str, str]] = {
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

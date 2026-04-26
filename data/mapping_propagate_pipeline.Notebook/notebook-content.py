@@ -23,18 +23,14 @@
 # MARKDOWN ********************
 
 # # Pipeline: mapping_propagate
-#
 # Tenant-scoped pipeline. Triggered by the "Run sync now" button on
 # /admin/mappings (web app). Web action passes pipeline_run_id +
 # tenant_id + triggered_by as notebook parameters; this notebook updates
 # the row the web already inserted instead of double-writing.
-#
 # Steps: config_sync → silver_account_xref_build → gold_fact_sale_build
-#
 # Scheduled? No — daily incremental_refresh re-runs these same steps as
 # part of the broader chain. This notebook is only for the
 # admin-triggered "I just saved mappings, push them now" path.
-#
 # ---
 # Pipeline helpers (Supabase REST writeback to pipeline_run).
 # Inlined in every orchestrator notebook because Fabric doesn't support
@@ -189,8 +185,7 @@ triggered_by = "schedule"
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

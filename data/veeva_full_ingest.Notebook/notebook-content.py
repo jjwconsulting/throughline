@@ -23,7 +23,6 @@
 # MARKDOWN ********************
 
 # # Bronze Veeva FULL ingest
-#
 # For each enabled tenant in `config.tenant_veeva`:
 #   1. Authenticate to the tenant's Vault
 #   2. List FULL Direct Data extracts; pick the most recent
@@ -34,12 +33,9 @@
 #      `bronze_<slug>.veeva_(obj|meta|pl)_<name>` Delta table with ingest
 #      metadata columns appended
 #   7. Log outcome to `ops.veeva_ingest_log`
-#
 # Multi-tenant from day one. Idempotent: skips already-ingested extracts.
 # Each tenant runs in isolation — one tenant's failure doesn't block others.
-#
 # Phase 2 scope: FULL only. Phase 3 will add incremental + cursor.
-#
 # Before running:
 #   1. Run `packages/db/scripts/seed-tenant-veeva-fennecpharma.sql` in Supabase
 #   2. Run `config_sync` notebook (push tenant_veeva to Fabric)
@@ -49,7 +45,7 @@
 
 # Per-tenant passwords. Key by tenant slug. Set at runtime; never commit.
 # Example: VEEVA_PASSWORDS = {"acme-pharma": "your-password-here"}
-VEEVA_PASSWORDS: dict[str, str] = {}
+VEEVA_PASSWORDS: dict[str, str] = {"acme-pharma": "Sentero2026!!"}
 
 # Optional: limit to specific tenants. Empty = process all enabled tenants.
 TENANT_SLUGS: list[str] = []
@@ -66,14 +62,12 @@ KEEP_ARCHIVES = True
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # MARKDOWN ********************
 
 # ## Veeva Direct Data API client
-#
 # Inlined from `notebooks/lib/veeva_directdata.py`. Keep them in sync — when
 # updating client behavior, edit both files. Long-term: package as a wheel
 # in a Fabric custom environment.

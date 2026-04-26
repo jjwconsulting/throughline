@@ -23,20 +23,16 @@
 # MARKDOWN ********************
 
 # # Silver build: picklist
-#
 # Cross-cutting lookup table built from each tenant's
 # `bronze_<slug>.veeva_pl_picklist__sys`. Maps
 # `(tenant_id, object, field, code)` → `label` so other silver builds can
 # translate Veeva picklist codes to human-readable display values.
-#
 # `picklist__sys` carries incremental history like every other Veeva object,
 # so we dedup by `(object, object_field, picklist_value_name)` keeping the
 # latest `modified_date__v`.
-#
 # Both active and inactive picklist values are kept — older bronze rows may
 # reference codes that have since been deactivated, and we still want to
 # resolve them.
-#
 # Run BEFORE any silver build that needs picklist translation
 # (silver_hcp_build, silver_hco_build, etc.). Schedule daily after
 # veeva_full_ingest in prod.

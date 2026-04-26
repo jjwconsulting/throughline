@@ -23,14 +23,11 @@
 # MARKDOWN ********************
 
 # # Silver build: hco
-#
 # Builds `silver.hco` (one row per Veeva account that's an institution) from
 # bronze Veeva account__v across all enabled tenants.
-#
 # Same pattern as silver_hcp_build, but with:
 #   - HCO discriminator: `ispersonaccount__v = 'false'`
 #   - HCO-relevant columns (beds, AHA ID, hospital_type, parent account, etc.)
-#
 # Depends on `silver.picklist` for label translation. Run
 # silver_picklist_build first.
 
@@ -79,8 +76,7 @@ SOURCE_RULES: dict[str, dict[str, str]] = {
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

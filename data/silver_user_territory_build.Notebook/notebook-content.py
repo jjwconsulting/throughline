@@ -23,15 +23,12 @@
 # MARKDOWN ********************
 
 # # Silver build: user_territory bridge (current state)
-#
 # Many-to-many bridge: which users (sales reps) are assigned to which
 # territories. Source: `bronze_<slug>.veeva_obj_user_territory__v`.
-#
 # Current-state only — captures the latest active assignments. For
 # point-in-time accuracy ("which territory was rep X on when call Y
 # happened?"), we'll add `silver.user_territory_assignment_scd2` later.
 # For v1, fact_call attribution uses the current bridge.
-#
 # Same shape as silver.account_territory but for users instead of accounts.
 
 # CELL ********************

@@ -23,7 +23,6 @@
 # MARKDOWN ********************
 
 # # Bronze Veeva incremental ingest
-#
 # For each enabled tenant in `config.tenant_veeva`:
 #   1. Determine the cursor — `MAX(extract_stop_time)` of any successful or
 #      no-records row in `ops.veeva_ingest_log` for that tenant. If no cursor
@@ -33,25 +32,22 @@
 #        - skip if already in log with status='success'/'no_records'
 #        - if record_count == 0, log as 'no_records' (advances cursor, no DL)
 #        - else download, extract, **append** to bronze tables, log success
-#
 # Bronze is append-only (per ARCHITECTURE.md §2 — bronze is raw landing).
 # Multiple versions of the same row accumulate over time, ordered by Veeva's
 # `modified_date__v`. Silver build notebooks dedupe to current state.
-#
 # Append uses `mergeSchema=true` so new columns Veeva adds in incrementals
 # extend the bronze table without breaking the write.
-#
 # Schedule via Fabric Data Pipeline — every 15-30 min is a reasonable cadence
 # for "near-real-time" pharma data.
-#
 # Before running:
 #   1. Run `veeva_full_ingest` at least once for the tenant (creates cursor)
 #   2. Set `VEEVA_PASSWORDS` parameter
 
+
 # CELL ********************
 
 # Per-tenant passwords. Same dict shape as veeva_full_ingest. Set at runtime.
-VEEVA_PASSWORDS: dict[str, str] = {}
+VEEVA_PASSWORDS: dict[str, str] = {"acme-pharma": "Sentero2026!!"}
 
 # Optional: limit to specific tenants. Empty = process all enabled tenants.
 TENANT_SLUGS: list[str] = []
@@ -66,14 +62,12 @@ KEEP_ARCHIVES = True
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # MARKDOWN ********************
 
 # ## Veeva Direct Data API client
-#
 # Inlined from `notebooks/lib/veeva_directdata.py`. Identical to what's in
 # `veeva_full_ingest`. Keep them in sync until we package as a wheel.
 

@@ -23,10 +23,8 @@
 # MARKDOWN ********************
 
 # # Silver build: user
-#
 # Builds `silver.user` from bronze Veeva `user__sys`. All users (active +
 # inactive) included — historical calls reference inactive reps.
-#
 # Same pattern as silver_hcp_build / silver_hco_build but with no HCP/HCO
 # discriminator (every row in user__sys is a user). Picklist translation
 # applies to the categorical fields (user_type, status, country, etc.).
@@ -71,8 +69,7 @@ SOURCE_RULES: dict[str, dict[str, str]] = {
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

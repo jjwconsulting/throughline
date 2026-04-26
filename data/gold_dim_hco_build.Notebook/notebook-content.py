@@ -23,14 +23,11 @@
 # MARKDOWN ********************
 
 # # Gold build: dim_hco
-#
 # Star-schema HCO (institution / organization) dimension. Built from
 # `silver.hco`. Mirrors `gold.dim_hcp` shape:
-#
 #   - **`hco_key`** — deterministic MD5 surrogate key (tenant_id + veeva_account_id).
 #     Stable across rebuilds; used as FK from `fact_call.hco_key` for
 #     organization-account calls.
-#
 # Mostly a passthrough projection. silver.hco is already clean, deduped,
 # and picklist-translated.
 

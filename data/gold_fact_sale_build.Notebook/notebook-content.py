@@ -23,7 +23,6 @@
 # MARKDOWN ********************
 
 # # Gold build: fact_sale
-#
 # Builds `gold.fact_sale` from `silver.sale` with:
 #   - Account resolution via `silver.account_xref` →
 #     `gold.dim_hcp` or `gold.dim_hco` (mutually exclusive per row)
@@ -33,7 +32,6 @@
 #   - Transfers FILTERED OUT (legacy systems ignored them; net inventory
 #     impact across the whole population is zero, so each transfer leg
 #     would double-count if included). Stays in silver for audit.
-#
 # Unmapped accounts: rows survive with NULL account_key and NULL
 # account_type. The raw `distributor_account_id` is preserved so a
 # future `/admin/mappings` UI + signal can surface them as work to do.

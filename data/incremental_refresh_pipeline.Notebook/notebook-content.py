@@ -23,15 +23,12 @@
 # MARKDOWN ********************
 
 # # Pipeline: incremental_refresh
-#
-# Global pipeline (multi-tenant). Daily refresh that keeps gold tables
+# # Global pipeline (multi-tenant). Daily refresh that keeps gold tables
 # fresh against incremental source updates. Veeva incremental + SFTP +
 # config_sync + goals_sync + silver/gold rebuilds.
-#
-# Cadence: dev daily 2am, prod every 30-60 min during business hours.
+# # Cadence: dev daily 2am, prod every 30-60 min during business hours.
 # Triggered by Fabric scheduler. NOT customer-triggerable.
-#
-# Helpers below are inlined from the same shape used by every
+# # Helpers below are inlined from the same shape used by every
 # orchestrator notebook — keep in sync if you edit one, edit all.
 
 # CELL ********************

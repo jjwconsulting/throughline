@@ -23,30 +23,25 @@
 # MARKDOWN ********************
 
 # # Silver build: account_territory bridge
-#
 # Many-to-many bridge: which (HCP or HCO) accounts are assigned to which
 # territories. Built from `bronze_<slug>.veeva_obj_account_territory__v`.
-#
 # Polymorphic on account type — one row per (account, territory) regardless
 # of whether the account is an HCP or HCO. Downstream joins filter by joining
 # to `silver.hcp` (for HCP coverage) or `silver.hco` (for HCO coverage).
-#
 # Fennec has multiple-territory assignments per HCP because of overlapping
 # team coverage (Sales / MSL / KAM). Keeping all assignments preserves that.
 # Other clients with 1 HCP : 1 territory get one row each — same shape, no
 # special-casing.
-#
 # Fields preserved beyond just the FK pair:
 #   - status (translated via picklist)
 #   - is_manual: true if manually assigned, false if rule-assigned
 #   - rule: name/id of the rule that auto-assigned (proxy for "team" or
 #     "alignment type" when explicit team__v field is absent)
-#
 # Hardcoded build (no field-map) because the bridge schema is uniform
 # across tenants — same as silver.picklist.
-#
 # Depends on silver.picklist (for status translation). Run silver_picklist_build
 # first.
+
 
 # CELL ********************
 

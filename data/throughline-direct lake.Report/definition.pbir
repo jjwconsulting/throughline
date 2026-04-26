@@ -1,13 +1,9 @@
 {
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definitionProperties/2.0.0/schema.json",
   "version": "4.0",
   "datasetReference": {
-    "byConnection": {
-      "connectionString": "Data Source=powerbi://api.powerbi.com/v1.0/myorg/Notebooks4;Initial Catalog=throughline_direct_lake;Access Mode=readonly;Integrated Security=ClaimsToken",
-      "pbiServiceModelId": null,
-      "pbiModelVirtualServerName": "sobe_wowvirtualserver",
-      "pbiModelDatabaseName": "91b64f2e-d437-4394-93b9-74ea5ddbc4d0",
-      "name": "EntityDataSource",
-      "connectionType": "pbiServiceXmlaStyleLive"
+    "byPath": {
+      "path": "../throughline_direct_lake.SemanticModel"
     }
   }
 }

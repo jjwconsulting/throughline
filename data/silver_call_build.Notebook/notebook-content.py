@@ -23,18 +23,14 @@
 # MARKDOWN ********************
 
 # # Silver build: call
-#
 # Builds `silver.call` from bronze Veeva `call2__v`. One row per call event
 # (already deduped by id, latest modified_date__v).
-#
 # Includes ALL statuses (planned, in_progress, submitted, signed) — silver
 # is raw business entity per ARCHITECTURE.md §2. Reports filter by `status`
 # / `call_status` as needed.
-#
 # Foreign keys (`account_id`, `owner_user_id`, `territory_id`, etc.) stored
 # raw. Resolution to silver.hcp/hco/user/territory happens in gold dim/fact
 # notebooks via JOIN.
-#
 # Depends on `silver.picklist` for label translation. Run silver_picklist_build
 # first.
 
@@ -89,8 +85,7 @@ SOURCE_RULES: dict[str, dict[str, str]] = {
 
 # META {
 # META   "language": "python",
-# META   "language_group": "synapse_pyspark",
-# META   "tags": ["parameters"]
+# META   "language_group": "synapse_pyspark"
 # META }
 
 # CELL ********************

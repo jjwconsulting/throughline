@@ -23,10 +23,8 @@
 # MARKDOWN ********************
 
 # # Gold build: dim_user
-#
 # Star-schema user (sales rep / MSL / admin) dimension. Built from
 # `silver.user`. Adds `user_key` (MD5 surrogate) for fact_call FK joins.
-#
 # Includes a derived `is_active_normalized` boolean — combines tenant-specific
 # active-flag conventions (per `docs/architecture/tenant-variability.md`
 # category 3). Today: fennec uses `status='Active'`. Tomorrow's tenants may

@@ -23,11 +23,9 @@
 # MARKDOWN ********************
 
 # # Gold build: dim_hcp
-#
 # Star-schema HCP dimension. Built from `silver.hcp`. Adds:
 #   - **`hcp_key`** — deterministic MD5 surrogate key (tenant_id + veeva_account_id).
 #     Stable across rebuilds, suitable for fact_call FK joins.
-#
 # Otherwise mostly a passthrough projection — silver.hcp is already clean,
 # deduped, and picklist-translated. Gold's job here is mainly the surrogate
 # key and dropping silver-internal columns.
