@@ -119,6 +119,8 @@ TABLES = [
     "gold.dim_hco",
     "gold.dim_user",
     "gold.dim_account",
+    "gold.dim_territory",
+    "gold.bridge_account_territory",
     "gold.fact_call",
     "gold.fact_sale",
     "gold.fact_goal",

@@ -71,6 +71,16 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   account_key                STRING,
   account_type               STRING,    -- 'HCP' / 'HCO' / NULL when unmapped
   veeva_account_id           STRING,    -- the resolved Veeva id (denormalized)
+  -- Sales attribution (Phase A v1, current-state):
+  --   account_key → bridge_account_territory (is_primary=true) → territory_key
+  --   territory_key → dim_territory.current_rep_user_key
+  -- Three NULL cascade buckets surfaced on the dashboard health view:
+  --   account_key NULL              → unmapped distributor (no path)
+  --   no primary bridge row         → "Account not in any territory"
+  --   territory has no current rep  → "Territory unassigned"
+  territory_key              STRING,
+  rep_user_key               STRING,
+  attribution_status         STRING,    -- 'attributed' / 'unmapped' / 'no_territory' / 'no_rep'
   -- Geographic context
   account_address_line1      STRING,
   account_city               STRING,
@@ -120,10 +130,17 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
 #       -> gold.dim_hcp (when veeva account is a person)
 #       OR gold.dim_hco (when veeva account is an organization)
 #         -> hcp_key | hco_key  (account_key)
+#       -> gold.bridge_account_territory (is_primary=true)
+#         -> territory_key
+#         -> gold.dim_territory.current_rep_user_key
 #
 # Two LEFT JOINs to dim_hcp and dim_hco; COALESCE the keys. account_type
 # is derived from which side matched. Mutually exclusive — one Veeva
 # account is either an HCP or an HCO, never both.
+#
+# Sales attribution (Phase A): cascade through bridge + dim_territory to
+# resolve territory_key + rep_user_key. attribution_status records WHICH
+# step failed when null, so the health surface can break out the buckets.
 #
 # Note: account_xref join doesn't filter by source_system. Per-source
 # xref is a future refinement — for v1 a tenant has one canonical mapping.
@@ -156,6 +173,14 @@ SELECT
     ELSE NULL
   END                                                    AS account_type,
   xref.veeva_account_id,
+  bat.territory_key                                       AS territory_key,
+  dt.current_rep_user_key                                 AS rep_user_key,
+  CASE
+    WHEN COALESCE(hcp.hcp_key, hco.hco_key) IS NULL                  THEN 'unmapped'
+    WHEN bat.territory_key IS NULL                                   THEN 'no_territory'
+    WHEN dt.current_rep_user_key IS NULL                             THEN 'no_rep'
+    ELSE 'attributed'
+  END                                                     AS attribution_status,
   s.account_address_line1, s.account_city, s.account_state, s.account_postal_code,
   s.distributor_territory,
   s.channel, s.class_of_trade, s.business_unit, s.brand,
@@ -186,6 +211,14 @@ LEFT JOIN gold.dim_hcp hcp
 LEFT JOIN gold.dim_hco hco
   ON hco.tenant_id = s.tenant_id
   AND hco.veeva_account_id = xref.veeva_account_id
+-- Sales attribution: account_key → primary territory → current rep
+LEFT JOIN gold.bridge_account_territory bat
+  ON bat.tenant_id   = s.tenant_id
+  AND bat.account_key = COALESCE(hcp.hcp_key, hco.hco_key)
+  AND bat.is_primary = true
+LEFT JOIN gold.dim_territory dt
+  ON dt.tenant_id      = s.tenant_id
+  AND dt.territory_key = bat.territory_key
 WHERE s.transaction_type IN ({", ".join(f"'{t}'" for t in ANALYTICS_TRANSACTION_TYPES)})
 """
 
@@ -221,6 +254,19 @@ spark.sql(f"""
     SUM(CASE WHEN account_type IS NULL  THEN 1 ELSE 0 END) AS unmapped,
     ROUND(100.0 * SUM(CASE WHEN account_type IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_mapped
   FROM {GOLD_TABLE}
+""").show(truncate=False)
+
+print("=== Sales attribution rates (Phase A v1) ===")
+spark.sql(f"""
+  SELECT
+    attribution_status,
+    COUNT(*) AS rows,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_of_rows,
+    ROUND(SUM(signed_gross_dollars), 0) AS signed_gross_dollars,
+    ROUND(100.0 * SUM(signed_gross_dollars) / SUM(SUM(signed_gross_dollars)) OVER (), 1) AS pct_of_dollars
+  FROM {GOLD_TABLE}
+  GROUP BY attribution_status
+  ORDER BY signed_gross_dollars DESC
 """).show(truncate=False)
 
 print("=== Top 10 unmapped distributor accounts ===")

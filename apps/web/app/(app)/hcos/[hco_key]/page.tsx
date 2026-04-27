@@ -148,14 +148,19 @@ export default async function HcoDetail({
   if (!hco) notFound();
 
   const sqlScope = combineScopes(hcoScope(hco_key), scopeToSql(userScope));
+  // Sales loaders take the user-scope only (NOT combined with hcoScope —
+  // sales loaders bring their own account_key filter from their hcoKey
+  // param). Reps see only their attributed sales for this HCO; admins
+  // see tenant-wide sales for it.
+  const userSqlScope = scopeToSql(userScope);
   const [kpis, trend, callingReps, salesKpis, salesTrend, topProducts] =
     await Promise.all([
       loadInteractionKpis(tenantId, filters, sqlScope),
       loadTrend(tenantId, filters, sqlScope),
       loadHcoCallingReps(tenantId, filters, sqlScope),
-      loadHcoSalesKpis(tenantId, hco_key, filters),
-      loadHcoSalesTrend(tenantId, hco_key, filters),
-      loadHcoTopProducts(tenantId, hco_key, filters, 10),
+      loadHcoSalesKpis(tenantId, hco_key, filters, userSqlScope),
+      loadHcoSalesTrend(tenantId, hco_key, filters, userSqlScope),
+      loadHcoTopProducts(tenantId, hco_key, filters, 10, userSqlScope),
     ]);
 
   // Show the sales-related surfaces only when this HCO actually has sales

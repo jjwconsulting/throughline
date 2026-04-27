@@ -11,6 +11,7 @@ import {
   loadSalesTrend,
   loadTopUnmappedDistributors,
   loadTopHcosBySales,
+  loadTopRepsBySales,
 } from "@/lib/sales";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
@@ -102,6 +103,7 @@ export default async function Dashboard({
     salesTrend,
     topUnmapped,
     topHcosBySales,
+    topRepsBySales,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, rlsScope),
     loadTrend(tenantId, filters, rlsScope),
@@ -117,12 +119,14 @@ export default async function Dashboard({
     // the dashboard is showing.
     loadHcpInactivitySignals(tenantId, rlsScope),
     goalLookup,
-    // Sales loaders are tenant-wide (no rep RLS — fact_sale has no
-    // owner_user_key today). See lib/sales.ts header.
-    loadSalesKpis(tenantId, filters),
-    loadSalesTrend(tenantId, filters),
+    // Sales loaders use the same RLS scope as calls now that fact_sale
+    // has rep_user_key (Phase A). Reps see only their attributed sales;
+    // managers see their team's; admins see all incl. unmapped/unattributed.
+    loadSalesKpis(tenantId, filters, rlsScope),
+    loadSalesTrend(tenantId, filters, rlsScope),
     loadTopUnmappedDistributors(tenantId, filters, 10),
-    loadTopHcosBySales(tenantId, filters, 10),
+    loadTopHcosBySales(tenantId, filters, 10, rlsScope),
+    loadTopRepsBySales(tenantId, filters, 10, rlsScope),
   ]);
 
   const period = periodLabel(filters.range);
@@ -466,6 +470,81 @@ export default async function Dashboard({
                     </td>
                     <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
                       {formatNumber(Math.round(h.net_units))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {topRepsBySales.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">Top reps by Net Sales</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Net dollars in {period}, attributed via primary territory
+              ownership. Unattributed sales (no rep assignment yet) appear
+              as their own line so totals reconcile.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">Rep</th>
+                <th className="text-left font-normal px-5 py-2">Title</th>
+                <th className="text-right font-normal px-5 py-2">HCOs</th>
+                <th className="text-right font-normal px-5 py-2">Net sales</th>
+                <th className="text-right font-normal px-5 py-2">Units</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topRepsBySales.map((r, i) => {
+                const isUnattributed = r.rep_user_key == null;
+                return (
+                  <tr
+                    key={r.rep_user_key ?? "__unattributed__"}
+                    className={
+                      "border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)] " +
+                      (isUnattributed ? "bg-[var(--color-surface-alt)]/40" : "")
+                    }
+                  >
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {i + 1}
+                    </td>
+                    <td className="px-5 py-2">
+                      {isUnattributed ? (
+                        <Link
+                          href="/admin/mappings"
+                          className="text-[var(--color-ink-muted)] italic hover:text-[var(--color-primary)] hover:underline"
+                          title="Sales without a rep — could be unmapped distributors, accounts not in any territory, or territories with no current rep. Click to manage mappings."
+                        >
+                          {r.rep_name}
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/reps/${encodeURIComponent(r.rep_user_key!)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {r.rep_name}
+                        </Link>
+                      )}
+                    </td>
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {isUnattributed ? "—" : (r.rep_title ?? "—")}
+                    </td>
+                    <td className="px-5 py-2 text-right text-[var(--color-ink-muted)]">
+                      {r.account_count != null
+                        ? formatNumber(r.account_count)
+                        : "—"}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono">
+                      {formatCompactDollars(r.net_gross_dollars)}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                      {formatNumber(Math.round(r.net_units))}
                     </td>
                   </tr>
                 );

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "gold_bridge_account_territory_build"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "7a4b9203-b123-5678-0123-456789012345"
+  }
+}

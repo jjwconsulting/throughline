@@ -4,12 +4,13 @@
 // gold.fact_sale doesn't exist yet (cold start before the sales pipeline
 // runs). Empty results = $0 cards + empty trend, never a 500.
 //
-// RLS note: gold.fact_sale has no owner_user_key — sales arrive at the
-// distributor-account grain, not the rep grain. Until we ship a
-// HCP↔territory bridge + rep_user_key resolution, every role in a tenant
-// sees the same sales totals. The mapping UI exposes this to admins; reps
-// see tenant-wide sales. Acceptable for v1; revisit when territory rollups
-// land.
+// RLS: gold.fact_sale.rep_user_key is populated as of Phase A (sales
+// attribution via dim_territory + bridge_account_territory). Reps see only
+// their attributed sales; managers see their team's; admins see all.
+// Unattributed rows (rep_user_key IS NULL) include unmapped distributors,
+// accounts not in any territory, and territories with no current rep —
+// per project_unmapped_sales_visibility memory, they MUST stay visible
+// in tenant-wide aggregates and surface separately as "Unattributed".
 
 import { queryFabric } from "@/lib/fabric";
 import {
@@ -20,6 +21,22 @@ import {
   type DashboardFilters,
   type Granularity,
 } from "@/app/(app)/dashboard/filters";
+import { type Scope, NO_SCOPE } from "@/lib/interactions";
+
+// Sales-side RLS clauses use `f.rep_user_key` (different column than
+// fact_call's `f.owner_user_key`). interactions.ts emits clauses keyed
+// on owner_user_key; we rewrite them here so the same UserScope can drive
+// both. Cheaper than building a parallel scope-emitter.
+function rewriteScopeForSales(scope: Scope): Scope {
+  return {
+    clauses: scope.clauses.map((c) => c.replaceAll("owner_user_key", "rep_user_key")),
+    params: scope.params,
+  };
+}
+
+function scopeSql(scope: Scope): string {
+  return scope.clauses.join(" ");
+}
 
 // ---------------------------------------------------------------------------
 // KPIs
@@ -56,9 +73,11 @@ function isoDateMinusDays(iso: string, days: number): string {
 export async function loadSalesKpis(
   tenantId: string,
   filters: DashboardFilters,
+  scope: Scope = NO_SCOPE,
 ): Promise<SalesKpis> {
   try {
-    const params = filtersToParams(filters);
+    const salesScope = rewriteScopeForSales(scope);
+    const params = { ...filtersToParams(filters), ...salesScope.params };
     const dates = rangeDates(filters.range);
 
     if (!dates) {
@@ -71,8 +90,9 @@ export async function loadSalesKpis(
            0 AS net_gross_dollars_prior,
            COUNT(DISTINCT CASE WHEN account_key IS NOT NULL THEN account_key END) AS accounts_mapped,
            COUNT(DISTINCT CASE WHEN account_key IS NULL THEN distributor_account_id END) AS accounts_unmapped
-         FROM gold.fact_sale
-         WHERE tenant_id = @tenantId`,
+         FROM gold.fact_sale f
+         WHERE f.tenant_id = @tenantId
+           ${scopeSql(salesScope)}`,
         params,
       );
       return rows[0] ?? emptySalesKpis();
@@ -93,10 +113,11 @@ export async function loadSalesKpis(
          COALESCE(SUM(CASE WHEN transaction_date >= @kpiPriorStart  AND transaction_date <= @kpiPriorEnd  THEN signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_prior,
          COUNT(DISTINCT CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd AND account_key IS NOT NULL THEN account_key END) AS accounts_mapped,
          COUNT(DISTINCT CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd AND account_key IS NULL THEN distributor_account_id END) AS accounts_unmapped
-       FROM gold.fact_sale
-       WHERE tenant_id = @tenantId
-         AND transaction_date >= @kpiPriorStart
-         AND transaction_date <= @kpiPeriodEnd`,
+       FROM gold.fact_sale f
+       WHERE f.tenant_id = @tenantId
+         AND f.transaction_date >= @kpiPriorStart
+         AND f.transaction_date <= @kpiPeriodEnd
+         ${scopeSql(salesScope)}`,
       {
         ...params,
         kpiPeriodStart: periodStart,
@@ -163,8 +184,10 @@ function bucketLabel(isoBucketStart: string, g: Granularity): string {
 export async function loadSalesTrend(
   tenantId: string,
   filters: DashboardFilters,
+  scope: Scope = NO_SCOPE,
 ): Promise<SalesTrendPoint[]> {
   try {
+    const salesScope = rewriteScopeForSales(scope);
     const buckets = chartBuckets(filters);
     const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
     const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
@@ -192,9 +215,10 @@ export async function loadSalesTrend(
          ON f.tenant_id = @tenantId
          AND f.transaction_date >= b.bucket_start
          AND f.transaction_date < ${addOneSql}
+         ${scopeSql(salesScope)}
        GROUP BY b.bucket_start
        ORDER BY b.bucket_start ASC`,
-      filtersToParams(filters),
+      { ...filtersToParams(filters), ...salesScope.params },
     );
 
     return rows.map((r) => ({
@@ -285,16 +309,15 @@ export async function loadTopHcosBySales(
   tenantId: string,
   filters: DashboardFilters,
   limit = 10,
+  scope: Scope = NO_SCOPE,
 ): Promise<TopHcoBySales[]> {
   try {
+    const salesScope = rewriteScopeForSales(scope);
     const dates = rangeDates(filters.range);
     const dateFilter = dates
       ? `AND f.transaction_date >= @filterStart AND f.transaction_date <= @filterEnd`
       : "";
-    const dateFilterUnaliased = dates
-      ? `AND transaction_date >= @filterStart AND transaction_date <= @filterEnd`
-      : "";
-    const params = filtersToParams(filters);
+    const params = { ...filtersToParams(filters), ...salesScope.params };
 
     const [mapped, unmappedAgg] = await Promise.all([
       queryFabric<{
@@ -326,6 +349,7 @@ export async function loadTopHcosBySales(
          WHERE f.tenant_id = @tenantId
            AND f.account_type = 'HCO'
            ${dateFilter}
+           ${scopeSql(salesScope)}
          GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
          ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
         params,
@@ -338,15 +362,16 @@ export async function loadTopHcosBySales(
       }>(
         tenantId,
         `SELECT
-           ROUND(SUM(signed_gross_dollars), 0) AS net_gross_dollars,
-           ROUND(SUM(signed_units), 0) AS net_units,
+           ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
+           ROUND(SUM(f.signed_units), 0) AS net_units,
            COUNT(*) AS rows,
-           COUNT(DISTINCT distributor_account_id) AS distributor_count
-         FROM gold.fact_sale
-         WHERE tenant_id = @tenantId
-           AND account_key IS NULL
-           AND distributor_account_id IS NOT NULL
-           ${dateFilterUnaliased}`,
+           COUNT(DISTINCT f.distributor_account_id) AS distributor_count
+         FROM gold.fact_sale f
+         WHERE f.tenant_id = @tenantId
+           AND f.account_key IS NULL
+           AND f.distributor_account_id IS NOT NULL
+           ${dateFilter}
+           ${scopeSql(salesScope)}`,
         params,
       ),
     ]);
@@ -422,8 +447,10 @@ export async function loadHcoSalesKpis(
   tenantId: string,
   hcoKey: string,
   filters: DashboardFilters,
+  scope: Scope = NO_SCOPE,
 ): Promise<HcoSalesKpis> {
   try {
+    const salesScope = rewriteScopeForSales(scope);
     const dates = rangeDates(filters.range);
     if (!dates) {
       const rows = await queryFabric<HcoSalesKpis>(
@@ -434,11 +461,12 @@ export async function loadHcoSalesKpis(
            COALESCE(SUM(signed_gross_dollars), 0) AS net_gross_dollars_period,
            0 AS net_gross_dollars_prior,
            CONVERT(varchar(10), MAX(transaction_date), 23) AS last_sale
-         FROM gold.fact_sale
-         WHERE tenant_id = @tenantId
-           AND account_key = @hcoKey
-           AND account_type = 'HCO'`,
-        { hcoKey },
+         FROM gold.fact_sale f
+         WHERE f.tenant_id = @tenantId
+           AND f.account_key = @hcoKey
+           AND f.account_type = 'HCO'
+           ${scopeSql(salesScope)}`,
+        { hcoKey, ...salesScope.params },
       );
       return rows[0] ?? emptyHcoSalesKpis();
     }
@@ -452,30 +480,33 @@ export async function loadHcoSalesKpis(
     const rows = await queryFabric<HcoSalesKpis>(
       tenantId,
       `WITH all_history AS (
-         SELECT MAX(transaction_date) AS last_sale
-         FROM gold.fact_sale
-         WHERE tenant_id = @tenantId
-           AND account_key = @hcoKey
-           AND account_type = 'HCO'
+         SELECT MAX(f.transaction_date) AS last_sale
+         FROM gold.fact_sale f
+         WHERE f.tenant_id = @tenantId
+           AND f.account_key = @hcoKey
+           AND f.account_type = 'HCO'
+           ${scopeSql(salesScope)}
        )
        SELECT
-         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd THEN signed_units ELSE 0 END), 0) AS net_units_period,
-         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPriorStart  AND transaction_date <= @kpiPriorEnd  THEN signed_units ELSE 0 END), 0) AS net_units_prior,
-         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd THEN signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_period,
-         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPriorStart  AND transaction_date <= @kpiPriorEnd  THEN signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_prior,
+         COALESCE(SUM(CASE WHEN f.transaction_date >= @kpiPeriodStart AND f.transaction_date <= @kpiPeriodEnd THEN f.signed_units ELSE 0 END), 0) AS net_units_period,
+         COALESCE(SUM(CASE WHEN f.transaction_date >= @kpiPriorStart  AND f.transaction_date <= @kpiPriorEnd  THEN f.signed_units ELSE 0 END), 0) AS net_units_prior,
+         COALESCE(SUM(CASE WHEN f.transaction_date >= @kpiPeriodStart AND f.transaction_date <= @kpiPeriodEnd THEN f.signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_period,
+         COALESCE(SUM(CASE WHEN f.transaction_date >= @kpiPriorStart  AND f.transaction_date <= @kpiPriorEnd  THEN f.signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_prior,
          CONVERT(varchar(10), (SELECT last_sale FROM all_history), 23) AS last_sale
-       FROM gold.fact_sale
-       WHERE tenant_id = @tenantId
-         AND account_key = @hcoKey
-         AND account_type = 'HCO'
-         AND transaction_date >= @kpiPriorStart
-         AND transaction_date <= @kpiPeriodEnd`,
+       FROM gold.fact_sale f
+       WHERE f.tenant_id = @tenantId
+         AND f.account_key = @hcoKey
+         AND f.account_type = 'HCO'
+         AND f.transaction_date >= @kpiPriorStart
+         AND f.transaction_date <= @kpiPeriodEnd
+         ${scopeSql(salesScope)}`,
       {
         hcoKey,
         kpiPeriodStart: periodStart,
         kpiPeriodEnd: periodEnd,
         kpiPriorStart: priorStart,
         kpiPriorEnd: priorEnd,
+        ...salesScope.params,
       },
     );
     return rows[0] ?? emptyHcoSalesKpis();
@@ -488,8 +519,10 @@ export async function loadHcoSalesTrend(
   tenantId: string,
   hcoKey: string,
   filters: DashboardFilters,
+  scope: Scope = NO_SCOPE,
 ): Promise<SalesTrendPoint[]> {
   try {
+    const salesScope = rewriteScopeForSales(scope);
     const buckets = chartBuckets(filters);
     const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
     const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
@@ -519,9 +552,10 @@ export async function loadHcoSalesTrend(
          AND f.account_type = 'HCO'
          AND f.transaction_date >= b.bucket_start
          AND f.transaction_date < ${addOneSql}
+         ${scopeSql(salesScope)}
        GROUP BY b.bucket_start
        ORDER BY b.bucket_start ASC`,
-      { hcoKey },
+      { hcoKey, ...salesScope.params },
     );
 
     return rows.map((r) => ({
@@ -554,29 +588,301 @@ export async function loadHcoTopProducts(
   hcoKey: string,
   filters: DashboardFilters,
   limit = 10,
+  scope: Scope = NO_SCOPE,
 ): Promise<HcoTopProduct[]> {
   try {
+    const salesScope = rewriteScopeForSales(scope);
     const dates = rangeDates(filters.range);
     const dateFilter = dates
-      ? `AND transaction_date >= @filterStart AND transaction_date <= @filterEnd`
+      ? `AND f.transaction_date >= @filterStart AND f.transaction_date <= @filterEnd`
       : "";
     return await queryFabric<HcoTopProduct>(
       tenantId,
       `SELECT TOP ${limit}
-         MAX(product_name) AS product_name,
-         product_ndc,
-         MAX(brand) AS brand,
-         ROUND(SUM(signed_gross_dollars), 0) AS net_gross_dollars,
-         ROUND(SUM(signed_units), 0) AS net_units,
+         MAX(f.product_name) AS product_name,
+         f.product_ndc,
+         MAX(f.brand) AS brand,
+         ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
+         ROUND(SUM(f.signed_units), 0) AS net_units,
          COUNT(*) AS rows
-       FROM gold.fact_sale
-       WHERE tenant_id = @tenantId
-         AND account_key = @hcoKey
-         AND account_type = 'HCO'
+       FROM gold.fact_sale f
+       WHERE f.tenant_id = @tenantId
+         AND f.account_key = @hcoKey
+         AND f.account_type = 'HCO'
          ${dateFilter}
-       GROUP BY product_ndc
-       ORDER BY ABS(SUM(signed_gross_dollars)) DESC`,
-      { ...filtersToParams(filters), hcoKey },
+         ${scopeSql(salesScope)}
+       GROUP BY f.product_ndc
+       ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+      { ...filtersToParams(filters), ...salesScope.params, hcoKey },
+    );
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Top reps by Net Sales (with an "Unattributed" pseudo-row, mirroring the
+// pattern from loadTopHcosBySales).
+//
+// Three "unattributed" buckets get rolled up into one synthetic row to
+// stay simple; the dashboard's existing /admin/pipelines / mapping pages
+// already break out unmapped vs no_territory vs no_rep separately. Here
+// we just want one number admins can see: "$X.XK of recent sales aren't
+// attributed to any rep."
+// ---------------------------------------------------------------------------
+
+export type TopRepBySales = {
+  rep_user_key: string | null; // null marks the synthetic Unattributed row
+  rep_name: string;
+  rep_title: string | null;
+  net_gross_dollars: number;
+  net_units: number;
+  rows: number;
+  account_count: number | null; // distinct HCOs contributing; null on Unattributed
+};
+
+export async function loadTopRepsBySales(
+  tenantId: string,
+  filters: DashboardFilters,
+  limit = 10,
+  scope: Scope = NO_SCOPE,
+): Promise<TopRepBySales[]> {
+  try {
+    const salesScope = rewriteScopeForSales(scope);
+    const dates = rangeDates(filters.range);
+    const dateFilter = dates
+      ? `AND f.transaction_date >= @filterStart AND f.transaction_date <= @filterEnd`
+      : "";
+    const params = { ...filtersToParams(filters), ...salesScope.params };
+
+    const [attributed, unattributedAgg] = await Promise.all([
+      queryFabric<{
+        rep_user_key: string;
+        rep_name: string;
+        rep_title: string | null;
+        net_gross_dollars: number;
+        net_units: number;
+        rows: number;
+        account_count: number;
+      }>(
+        tenantId,
+        `SELECT TOP ${limit + 1}
+           u.user_key AS rep_user_key,
+           u.name AS rep_name,
+           u.title AS rep_title,
+           ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
+           ROUND(SUM(f.signed_units), 0) AS net_units,
+           COUNT(*) AS rows,
+           COUNT(DISTINCT f.account_key) AS account_count
+         FROM gold.fact_sale f
+         JOIN gold.dim_user u
+           ON u.user_key = f.rep_user_key
+           AND u.tenant_id = @tenantId
+         WHERE f.tenant_id = @tenantId
+           AND f.rep_user_key IS NOT NULL
+           ${dateFilter}
+           ${scopeSql(salesScope)}
+         GROUP BY u.user_key, u.name, u.title
+         ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+        params,
+      ),
+      queryFabric<{
+        net_gross_dollars: number | null;
+        net_units: number | null;
+        rows: number;
+      }>(
+        tenantId,
+        `SELECT
+           ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
+           ROUND(SUM(f.signed_units), 0) AS net_units,
+           COUNT(*) AS rows
+         FROM gold.fact_sale f
+         WHERE f.tenant_id = @tenantId
+           AND f.rep_user_key IS NULL
+           ${dateFilter}
+           ${scopeSql(salesScope)}`,
+        params,
+      ),
+    ]);
+
+    const combined: TopRepBySales[] = attributed.map((r) => ({
+      rep_user_key: r.rep_user_key,
+      rep_name: r.rep_name,
+      rep_title: r.rep_title,
+      net_gross_dollars: Number(r.net_gross_dollars) || 0,
+      net_units: Number(r.net_units) || 0,
+      rows: Number(r.rows) || 0,
+      account_count: Number(r.account_count) || 0,
+    }));
+
+    const unattributedRow = unattributedAgg[0];
+    if (unattributedRow && Number(unattributedRow.rows) > 0) {
+      combined.push({
+        rep_user_key: null,
+        rep_name: "Unattributed",
+        rep_title: null,
+        net_gross_dollars: Number(unattributedRow.net_gross_dollars) || 0,
+        net_units: Number(unattributedRow.net_units) || 0,
+        rows: Number(unattributedRow.rows) || 0,
+        account_count: null,
+      });
+    }
+
+    combined.sort(
+      (a, b) => Math.abs(b.net_gross_dollars) - Math.abs(a.net_gross_dollars),
+    );
+    return combined.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rep-scoped sales loaders (for /reps/[user_key] detail page).
+// All filter on `rep_user_key = userKey`. Mirrors HCO-scoped loaders.
+// ---------------------------------------------------------------------------
+
+export async function loadRepSalesKpis(
+  tenantId: string,
+  userKey: string,
+  filters: DashboardFilters,
+): Promise<HcoSalesKpis> {
+  try {
+    const dates = rangeDates(filters.range);
+    if (!dates) {
+      const rows = await queryFabric<HcoSalesKpis>(
+        tenantId,
+        `SELECT
+           COALESCE(SUM(signed_units), 0) AS net_units_period,
+           0 AS net_units_prior,
+           COALESCE(SUM(signed_gross_dollars), 0) AS net_gross_dollars_period,
+           0 AS net_gross_dollars_prior,
+           CONVERT(varchar(10), MAX(transaction_date), 23) AS last_sale
+         FROM gold.fact_sale
+         WHERE tenant_id = @tenantId AND rep_user_key = @userKey`,
+        { userKey },
+      );
+      return rows[0] ?? emptyHcoSalesKpis();
+    }
+    const days = rangeDays(filters.range)!;
+    const periodStart = dates.start;
+    const periodEnd = dates.end;
+    const priorStart = isoDateMinusDays(periodStart, days);
+    const priorEnd = isoDateMinusDays(periodStart, 1);
+    const rows = await queryFabric<HcoSalesKpis>(
+      tenantId,
+      `WITH all_history AS (
+         SELECT MAX(transaction_date) AS last_sale
+         FROM gold.fact_sale
+         WHERE tenant_id = @tenantId AND rep_user_key = @userKey
+       )
+       SELECT
+         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd THEN signed_units ELSE 0 END), 0) AS net_units_period,
+         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPriorStart  AND transaction_date <= @kpiPriorEnd  THEN signed_units ELSE 0 END), 0) AS net_units_prior,
+         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPeriodStart AND transaction_date <= @kpiPeriodEnd THEN signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_period,
+         COALESCE(SUM(CASE WHEN transaction_date >= @kpiPriorStart  AND transaction_date <= @kpiPriorEnd  THEN signed_gross_dollars ELSE 0 END), 0) AS net_gross_dollars_prior,
+         CONVERT(varchar(10), (SELECT last_sale FROM all_history), 23) AS last_sale
+       FROM gold.fact_sale
+       WHERE tenant_id = @tenantId AND rep_user_key = @userKey
+         AND transaction_date >= @kpiPriorStart
+         AND transaction_date <= @kpiPeriodEnd`,
+      {
+        userKey,
+        kpiPeriodStart: periodStart,
+        kpiPeriodEnd: periodEnd,
+        kpiPriorStart: priorStart,
+        kpiPriorEnd: priorEnd,
+      },
+    );
+    return rows[0] ?? emptyHcoSalesKpis();
+  } catch {
+    return emptyHcoSalesKpis();
+  }
+}
+
+export async function loadRepSalesTrend(
+  tenantId: string,
+  userKey: string,
+  filters: DashboardFilters,
+): Promise<SalesTrendPoint[]> {
+  try {
+    const buckets = chartBuckets(filters);
+    const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
+    const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
+    const rows = await queryFabric<{
+      bucket_start: string;
+      net_dollars: number;
+      net_units: number;
+    }>(
+      tenantId,
+      `WITH anchor AS (SELECT ${anchorSql} AS this_bucket),
+       buckets AS (
+         SELECT DATEADD(${stepUnit}, -n, a.this_bucket) AS bucket_start
+         FROM anchor a CROSS JOIN (VALUES ${valuesList}) AS w(n)
+       )
+       SELECT
+         CONVERT(varchar(10), b.bucket_start, 23) AS bucket_start,
+         COALESCE(SUM(f.signed_gross_dollars), 0) AS net_dollars,
+         COALESCE(SUM(f.signed_units), 0) AS net_units
+       FROM buckets b
+       LEFT JOIN gold.fact_sale f
+         ON f.tenant_id = @tenantId
+         AND f.rep_user_key = @userKey
+         AND f.transaction_date >= b.bucket_start
+         AND f.transaction_date < ${addOneSql}
+       GROUP BY b.bucket_start
+       ORDER BY b.bucket_start ASC`,
+      { userKey },
+    );
+    return rows.map((r) => ({
+      bucket_start: r.bucket_start,
+      bucket_label: bucketLabel(r.bucket_start, filters.granularity),
+      net_dollars: Number(r.net_dollars) || 0,
+      net_units: Number(r.net_units) || 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export type RepTopHco = {
+  hco_key: string;
+  name: string;
+  hco_type: string | null;
+  city: string | null;
+  state: string | null;
+  net_gross_dollars: number;
+  net_units: number;
+  rows: number;
+};
+
+export async function loadRepTopHcos(
+  tenantId: string,
+  userKey: string,
+  filters: DashboardFilters,
+  limit = 10,
+): Promise<RepTopHco[]> {
+  try {
+    const dates = rangeDates(filters.range);
+    const dateFilter = dates
+      ? `AND f.transaction_date >= @filterStart AND f.transaction_date <= @filterEnd`
+      : "";
+    return await queryFabric<RepTopHco>(
+      tenantId,
+      `SELECT TOP ${limit}
+         h.hco_key, h.name, h.hco_type, h.city, h.state,
+         ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
+         ROUND(SUM(f.signed_units), 0) AS net_units,
+         COUNT(*) AS rows
+       FROM gold.fact_sale f
+       JOIN gold.dim_hco h ON h.hco_key = f.account_key AND h.tenant_id = @tenantId
+       WHERE f.tenant_id = @tenantId
+         AND f.rep_user_key = @userKey
+         AND f.account_type = 'HCO'
+         ${dateFilter}
+       GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
+       ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+      { ...filtersToParams(filters), userKey },
     );
   } catch {
     return [];

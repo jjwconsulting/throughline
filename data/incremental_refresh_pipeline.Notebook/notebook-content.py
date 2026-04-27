@@ -186,6 +186,8 @@ STEPS = [
     "gold_dim_hco_build",
     "gold_dim_user_build",
     "gold_dim_account_build",
+    "gold_dim_territory_build",
+    "gold_bridge_account_territory_build",
     "gold_fact_call_build",
     "gold_fact_sale_build",
 ]

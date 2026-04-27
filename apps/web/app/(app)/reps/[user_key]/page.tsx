@@ -8,6 +8,11 @@ import {
   repScope,
 } from "@/lib/interactions";
 import {
+  loadRepSalesKpis,
+  loadRepSalesTrend,
+  loadRepTopHcos,
+} from "@/lib/sales";
+import {
   getCurrentScope,
   scopeToSql,
   canSeeRep,
@@ -85,6 +90,14 @@ function deltaLabel(current: number, prior: number): string | null {
   return `${sign}${pct.toFixed(0)}% vs prior period`;
 }
 
+function formatCompactDollars(n: number): string {
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${Math.round(abs)}`;
+}
+
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type RouteParams = Promise<{ user_key: string }>;
 
@@ -114,8 +127,16 @@ export default async function RepDetail({
   // but harmless (they evaluate to the same row set).
   const sqlScope = combineScopes(repScope(user_key), scopeToSql(scope));
   const dateRange = rangeDates(filters.range);
-  const [kpis, trend, topHcps, inactivitySignals, proratedGoal] =
-    await Promise.all([
+  const [
+    kpis,
+    trend,
+    topHcps,
+    inactivitySignals,
+    proratedGoal,
+    repSalesKpis,
+    repSalesTrend,
+    repTopHcosBySales,
+  ] = await Promise.all([
       loadInteractionKpis(tenantId, filters, sqlScope),
       loadTrend(tenantId, filters, sqlScope),
       loadTopHcps(tenantId, filters, sqlScope),
@@ -130,7 +151,15 @@ export default async function RepDetail({
             rangeEnd: dateRange.end,
           })
         : Promise.resolve(null),
+      loadRepSalesKpis(tenantId, user_key, filters),
+      loadRepSalesTrend(tenantId, user_key, filters),
+      loadRepTopHcos(tenantId, user_key, filters, 10),
     ]);
+
+  const hasSalesHistory =
+    repSalesKpis.last_sale != null ||
+    repSalesKpis.net_gross_dollars_period !== 0 ||
+    repSalesKpis.net_gross_dollars_prior !== 0;
 
   const period = periodLabel(filters.range);
   const interactionLabel =
@@ -152,7 +181,7 @@ export default async function RepDetail({
       : filters.range === "all"
         ? null
         : deltaLabel(kpis.calls_period, kpis.calls_prior);
-  const cards = [
+  const cards: { label: string; value: string; delta: string | null }[] = [
     {
       label: `${interactionLabel} (${period})`,
       value: formatNumber(kpis.calls_period),
@@ -165,6 +194,19 @@ export default async function RepDetail({
       delta: formatDateLabel(kpis.last_call),
     },
   ];
+  if (hasSalesHistory) {
+    cards.push({
+      label: `Net sales (${period})`,
+      value: formatCompactDollars(repSalesKpis.net_gross_dollars_period),
+      delta:
+        filters.range !== "all" && repSalesKpis.net_gross_dollars_prior !== 0
+          ? deltaLabel(
+              repSalesKpis.net_gross_dollars_period,
+              repSalesKpis.net_gross_dollars_prior,
+            )
+          : null,
+    });
+  }
 
   return (
     <div className="space-y-6">
@@ -191,7 +233,13 @@ export default async function RepDetail({
 
       <div className="space-y-3">
         <AccountToggle value={filters.account} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div
+          className={
+            hasSalesHistory
+              ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+              : "grid grid-cols-1 md:grid-cols-3 gap-4"
+          }
+        >
           {cards.map((c) => (
             <div
               key={c.label}
@@ -233,6 +281,89 @@ export default async function RepDetail({
           />
         </div>
       </div>
+
+      {hasSalesHistory ? (
+        <>
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+            <div className="px-5 py-4 border-b border-[var(--color-border)]">
+              <h2 className="font-display text-lg">
+                Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+              </h2>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+                most recent {filters.granularity}
+                {chartBuckets(filters) === 1 ? "" : "s"} attributed to {rep.name}
+                {repSalesKpis.last_sale ? (
+                  <> · last sale {formatDateLabel(repSalesKpis.last_sale)}</>
+                ) : null}
+              </p>
+            </div>
+            <div className="px-2 py-4">
+              <TrendChart
+                data={repSalesTrend}
+                valueKey="net_dollars"
+                valueLabel="Net sales"
+                format="dollars"
+              />
+            </div>
+          </div>
+
+          {repTopHcosBySales.length > 0 ? (
+            <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+              <div className="px-5 py-4 border-b border-[var(--color-border)]">
+                <h2 className="font-display text-lg">Top HCOs by Net Sales</h2>
+                <p className="text-xs text-[var(--color-ink-muted)]">
+                  Top accounts in {period} for {rep.name}
+                </p>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="text-xs text-[var(--color-ink-muted)]">
+                  <tr>
+                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                    <th className="text-left font-normal px-5 py-2">HCO</th>
+                    <th className="text-left font-normal px-5 py-2">Type</th>
+                    <th className="text-left font-normal px-5 py-2">Location</th>
+                    <th className="text-right font-normal px-5 py-2">Net sales</th>
+                    <th className="text-right font-normal px-5 py-2">Units</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {repTopHcosBySales.map((h, i) => (
+                    <tr
+                      key={h.hco_key}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">
+                        <Link
+                          href={`/hcos/${encodeURIComponent(h.hco_key)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {h.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {h.hco_type ?? "—"}
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {[h.city, h.state].filter(Boolean).join(", ") || "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatCompactDollars(h.net_gross_dollars)}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                        {formatNumber(Math.round(h.net_units))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </>
+      ) : null}
 
       <SignalsPanel
         title="HCPs to re-engage"
