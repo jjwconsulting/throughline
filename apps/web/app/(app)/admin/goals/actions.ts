@@ -268,11 +268,15 @@ export async function uploadGoalsAction(
     goalUnit = "units";
     entityType = "territory";
   }
-  // Entity column varies by metric: rep_email for calls (rep entity),
-  // territory_name for units (territory entity).
+  // Entity column varies by metric. For territory units goals, accept
+  // either `territory_description` (geographic, preferred) or
+  // `territory_name` (Veeva code) — admins can match by whichever they
+  // recognize. Description wins if both are present in the header.
   const entityColIdx =
     entityType === "territory"
-      ? header.indexOf("territory_name")
+      ? header.indexOf("territory_description") >= 0
+        ? header.indexOf("territory_description")
+        : header.indexOf("territory_name")
       : header.indexOf("rep_email");
   const idx = {
     entity: entityColIdx,
@@ -281,7 +285,9 @@ export async function uploadGoalsAction(
   };
   if (idx.entity < 0 || idx.period < 0 || idx.goal < 0) {
     const expectedEntity =
-      entityType === "territory" ? "territory_name" : "rep_email";
+      entityType === "territory"
+        ? "territory_description (or territory_name)"
+        : "rep_email";
     return {
       ...empty,
       rowResults: [
@@ -295,21 +301,27 @@ export async function uploadGoalsAction(
   }
 
   // Build the entity lookup map: email → user_key for rep goals,
-  // lowercase-name → territory_key for territory goals.
+  // lowercase-name OR lowercase-description → territory_key for territory
+  // goals. Both forms populate the same map so the row-by-row lookup
+  // doesn't care which column the admin used.
   const entityKeyByLookup = new Map<string, string>();
   if (entityType === "territory") {
     const territoryRows = await queryFabric<{
       territory_key: string;
       name: string;
+      description: string | null;
     }>(
       tenantId,
-      `SELECT territory_key, name
+      `SELECT territory_key, name, description
        FROM gold.dim_territory
        WHERE tenant_id = @tenantId
          AND COALESCE(status, '') IN ('', 'Active', 'active')`,
     );
     for (const t of territoryRows) {
       entityKeyByLookup.set(t.name.toLowerCase(), t.territory_key);
+      if (t.description) {
+        entityKeyByLookup.set(t.description.toLowerCase(), t.territory_key);
+      }
     }
   } else {
     const userRows = await queryFabric<{

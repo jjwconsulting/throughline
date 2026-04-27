@@ -899,7 +899,13 @@ export async function loadRepCoverageHcos(
          -- Territories this rep is actively assigned to in Veeva.
          -- Resolved via dim_user (user_key → veeva_user_id) →
          -- silver.user_territory → gold.dim_territory.
-         SELECT t.territory_key, t.name AS territory_name
+         SELECT
+           t.territory_key,
+           -- Display label: prefer geographic description (e.g. "Los
+           -- Angeles") over Veeva code (e.g. "C103") per
+           -- feedback_territory_display. Codes are admin internals; reps
+           -- and managers know their territories by region.
+           COALESCE(t.description, t.name) AS territory_label
          FROM gold.dim_user u
          JOIN silver.user_territory ut
            ON ut.tenant_id = u.tenant_id
@@ -911,11 +917,11 @@ export async function loadRepCoverageHcos(
          WHERE u.tenant_id = @tenantId AND u.user_key = @userKey
        ),
        hco_coverage AS (
-         -- Every HCO any rep_territory covers, with the territory names
+         -- Every HCO any rep_territory covers, with the territory labels
          -- collected so the UI can show paths of coverage.
          SELECT
            b.account_key,
-           STRING_AGG(rt.territory_name, ', ') WITHIN GROUP (ORDER BY rt.territory_name)
+           STRING_AGG(rt.territory_label, ', ') WITHIN GROUP (ORDER BY rt.territory_label)
              AS territories_covered
          FROM gold.bridge_account_territory b
          JOIN rep_territories rt
@@ -952,6 +958,34 @@ export async function loadRepCoverageHcos(
        ORDER BY is_primary_for_rep DESC, h.name`,
       { userKey },
     );
+  } catch {
+    return [];
+  }
+}
+
+// Territories where this rep is currently the primary credit-getter.
+// Returns territory_keys so the caller can sum overlapping territory-entity
+// goal portions to compute the rep's "effective goal" for sales attainment.
+//
+// CURRENT-STATE only (matches Phase A fact_sale.rep_user_key resolution):
+// uses dim_territory.current_rep_user_key, not point-in-time SCD2 history.
+// A mid-period rep change therefore shifts the entire period's goal credit
+// to whoever holds the territory today.
+export async function loadRepCurrentTerritoryKeys(
+  tenantId: string,
+  userKey: string,
+): Promise<string[]> {
+  try {
+    const rows = await queryFabric<{ territory_key: string }>(
+      tenantId,
+      `SELECT territory_key
+       FROM gold.dim_territory
+       WHERE tenant_id = @tenantId
+         AND current_rep_user_key = @userKey
+         AND COALESCE(status, '') IN ('', 'Active', 'active')`,
+      { userKey },
+    );
+    return rows.map((r) => r.territory_key);
   } catch {
     return [];
   }

@@ -12,6 +12,7 @@ import {
   loadTopUnmappedDistributors,
   loadTopHcosBySales,
   loadTopRepsBySales,
+  loadRepCurrentTerritoryKeys,
 } from "@/lib/sales";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
@@ -90,6 +91,32 @@ export default async function Dashboard({
         rangeEnd: dateRange.end,
       })
     : Promise.resolve(null);
+  // Units goal lookup: territory-entity (pharma standard). For a rep-role
+  // user the "effective goal" sums goals on territories where they're the
+  // current primary rep — same model as /reps/[user_key]. For admin /
+  // manager / bypass we fall through to tenant-wide sum (mirrors the
+  // calls-goal behavior; tightening manager scope is queued).
+  const unitsGoalLookup = dateRange
+    ? scope.role === "rep"
+      ? loadRepCurrentTerritoryKeys(tenantId, scope.userKey).then((ids) =>
+          loadOverlappingGoalSum({
+            tenantId,
+            metric: "units",
+            entityType: "territory",
+            entityFilter: { type: "in", ids },
+            rangeStart: dateRange.start,
+            rangeEnd: dateRange.end,
+          }),
+        )
+      : loadOverlappingGoalSum({
+          tenantId,
+          metric: "units",
+          entityType: "territory",
+          entityFilter: { type: "all" },
+          rangeStart: dateRange.start,
+          rangeEnd: dateRange.end,
+        })
+    : Promise.resolve(null);
 
   const [
     kpis,
@@ -99,6 +126,7 @@ export default async function Dashboard({
     topHcos,
     inactivitySignals,
     periodGoal,
+    unitsPeriodGoal,
     salesKpis,
     salesTrend,
     topUnmapped,
@@ -119,6 +147,7 @@ export default async function Dashboard({
     // the dashboard is showing.
     loadHcpInactivitySignals(tenantId, rlsScope),
     goalLookup,
+    unitsGoalLookup,
     // Sales loaders use the same RLS scope as calls now that fact_sale
     // has rep_user_key (Phase A). Reps see only their attributed sales;
     // managers see their team's; admins see all incl. unmapped/unattributed.
@@ -163,10 +192,22 @@ export default async function Dashboard({
     salesKpis.net_gross_dollars_period !== 0
       ? `${formatCompactDollars(salesKpis.net_gross_dollars_period)} net dollars`
       : null;
-  // Concatenate dollars + delta into delta line — keeps card layout
-  // unchanged (single sub-line) while fitting both pieces of info.
-  const salesSecondary =
-    salesDollarsLine && salesDelta
+  // Prefer attainment as the primary secondary-line piece when a units
+  // goal exists for this period (matches the calls card behavior).
+  // Dollars stays as the supporting context; delta drops off when goal
+  // is present (attainment IS the comparison).
+  const unitsAttainment =
+    unitsPeriodGoal != null && unitsPeriodGoal > 0
+      ? attainmentLabel(
+          Math.round(salesKpis.net_units_period),
+          unitsPeriodGoal,
+        ).label
+      : null;
+  const salesSecondary = unitsAttainment
+    ? salesDollarsLine
+      ? `${unitsAttainment} · ${salesDollarsLine}`
+      : unitsAttainment
+    : salesDollarsLine && salesDelta
       ? `${salesDollarsLine} · ${salesDelta}`
       : salesDollarsLine ?? salesDelta;
   const cards: { label: string; value: string; delta: string | null }[] = [
@@ -269,6 +310,14 @@ export default async function Dashboard({
             valueKey="net_units"
             valueLabel="Net units"
             format="number"
+            goalTotal={unitsPeriodGoal}
+            paceUnitLabel={
+              filters.granularity === "week"
+                ? "wk"
+                : filters.granularity === "month"
+                  ? "mo"
+                  : "qtr"
+            }
           />
         </div>
       </div>

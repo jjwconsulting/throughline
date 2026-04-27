@@ -73,15 +73,19 @@ export default async function AdminGoalsPage({
     const territories = await queryFabric<{
       territory_key: string;
       name: string;
+      description: string | null;
       current_rep_name: string | null;
       team_role: string | null;
     }>(
       tenantId,
-      `SELECT territory_key, name, current_rep_name, team_role
+      // Sort by description (geographic, e.g. "Los Angeles") so the form
+      // is alphabetized by what admins actually recognize. Falls back to
+      // name (the Veeva code) when description is empty.
+      `SELECT territory_key, name, description, current_rep_name, team_role
        FROM gold.dim_territory
        WHERE tenant_id = @tenantId
          AND COALESCE(status, '') IN ('', 'Active', 'active')
-       ORDER BY name`,
+       ORDER BY COALESCE(description, name)`,
     );
 
     if (territories.length === 0) {
@@ -92,10 +96,12 @@ export default async function AdminGoalsPage({
 
     entities = territories.map((t) => ({
       entity_id: t.territory_key,
-      name: t.name,
-      // Subtitle shows team role + currently assigned rep so the admin
-      // sees who's covering the territory at goal-set time.
+      // Geographic / human label as primary (per feedback_territory_display).
+      // Veeva code falls into the subtitle so admins still see it for
+      // cross-reference; falls back to code as primary if no description.
+      name: t.description ?? t.name,
       subtitle: [
+        t.description ? `Code: ${t.name}` : null,
         t.team_role,
         t.current_rep_name ? `Rep: ${t.current_rep_name}` : "No rep",
       ]

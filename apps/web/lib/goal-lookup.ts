@@ -8,7 +8,7 @@
 // goals_sync notebook) used only for PBI native measures and future
 // SQL-side sales-vs-goal joins. It is NOT read by these helpers.
 
-import { and, eq, gte, lte, schema } from "@throughline/db";
+import { and, eq, gte, inArray, lte, schema } from "@throughline/db";
 import { db } from "@/lib/db";
 
 export type GoalMetric =
@@ -26,7 +26,8 @@ export type GoalEntityType =
 
 export type GoalEntityFilter =
   | { type: "all" }
-  | { type: "single"; id: string };
+  | { type: "single"; id: string }
+  | { type: "in"; ids: string[] };
 
 // ---------------------------------------------------------------------------
 // Sum of overlapping goal portions for a given range.
@@ -52,10 +53,17 @@ export async function loadOverlappingGoalSum(args: {
     lte(schema.goal.periodStart, args.rangeEnd),
     gte(schema.goal.periodEnd, args.rangeStart),
   ];
+  // "in" with an empty id list short-circuits — no entities means no goal,
+  // not the same as "all" (which would inflate to tenant-wide).
+  if (args.entityFilter.type === "in" && args.entityFilter.ids.length === 0) {
+    return null;
+  }
   const whereClause =
     args.entityFilter.type === "single"
       ? and(...baseFilters, eq(schema.goal.entityId, args.entityFilter.id))
-      : and(...baseFilters);
+      : args.entityFilter.type === "in"
+        ? and(...baseFilters, inArray(schema.goal.entityId, args.entityFilter.ids))
+        : and(...baseFilters);
 
   const rows = await db
     .select({

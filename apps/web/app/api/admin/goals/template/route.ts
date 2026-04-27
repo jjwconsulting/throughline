@@ -44,21 +44,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const lines: string[] = [];
 
   if (metric === "units") {
-    // Sales goals = territory entity. CSV uses `territory_name` since
-    // it's human-readable (admins recognize "C101" in Excel; territory
-    // UUIDs are noise). The upload parser does name-based lookup back
-    // to territory_key.
+    // Sales goals = territory entity. CSV emits BOTH territory_description
+    // (geographic, e.g. "Los Angeles") and territory_name (Veeva code, e.g.
+    // "C103") so admins can match by either in Excel. The upload parser
+    // accepts either column as the entity-key column. Description is first
+    // because it's the recognition path for non-admin readers (per
+    // feedback_territory_display).
     const territories = await queryFabric<{
       territory_key: string;
       name: string;
+      description: string | null;
       current_rep_name: string | null;
     }>(
       tenantId,
-      `SELECT territory_key, name, current_rep_name
+      `SELECT territory_key, name, description, current_rep_name
        FROM gold.dim_territory
        WHERE tenant_id = @tenantId
          AND COALESCE(status, '') IN ('', 'Active', 'active')
-       ORDER BY name`,
+       ORDER BY COALESCE(description, name)`,
     );
 
     const recs = await recommendUnitsGoalsForTerritories(
@@ -71,11 +74,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       recs.map((r) => [r.entity_id, r.recommendation.value]),
     );
 
-    lines.push("territory_name,period,goal_units,recommended_units,current_rep");
+    lines.push(
+      "territory_description,territory_name,period,goal_units,recommended_units,current_rep",
+    );
     for (const t of territories) {
       const recommended = recByKey.get(t.territory_key) ?? 0;
       lines.push(
-        `${escapeCsv(t.name)},${periodLabel},${recommended},${recommended},${escapeCsv(t.current_rep_name ?? "")}`,
+        `${escapeCsv(t.description ?? "")},${escapeCsv(t.name)},${periodLabel},${recommended},${recommended},${escapeCsv(t.current_rep_name ?? "")}`,
       );
     }
   } else {

@@ -72,6 +72,10 @@ type HcoAttributionRow = {
   is_primary: number;
   territory_key: string;
   territory_name: string | null;
+  // Geographic / human label (e.g. "Los Angeles"). When present, render as
+  // primary label with `territory_name` (the Veeva code) as subtitle so
+  // admins recognize the territory by region instead of code.
+  territory_description: string | null;
   team_role: string | null;
   current_rep_user_key: string | null;
   current_rep_name: string | null;
@@ -95,6 +99,7 @@ async function loadHcoAttributionChain(
          CAST(b.is_primary AS INT) AS is_primary,
          b.territory_key,
          t.name                  AS territory_name,
+         t.description           AS territory_description,
          t.team_role,
          t.current_rep_user_key,
          t.current_rep_name,
@@ -499,7 +504,18 @@ export default async function HcoDetail({
                     )}
                   </td>
                   <td className="px-5 py-2">
-                    {a.territory_name ?? a.territory_key.slice(0, 8) + "…"}
+                    {a.territory_description ? (
+                      <>
+                        <div>{a.territory_description}</div>
+                        {a.territory_name ? (
+                          <div className="text-xs text-[var(--color-ink-muted)] font-mono">
+                            {a.territory_name}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      a.territory_name ?? a.territory_key.slice(0, 8) + "…"
+                    )}
                   </td>
                   <td className="px-5 py-2 text-[var(--color-ink-muted)] text-xs">
                     {a.team_role ?? "—"}

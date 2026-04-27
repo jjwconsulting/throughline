@@ -348,6 +348,176 @@ export async function loadGoalPaceSignals(
   return signals.slice(0, MAX_SIGNALS);
 }
 
+// ---------------------------------------------------------------------------
+// Sales goal pace: TERRITORIES whose actual net units so far in the current
+// goal period are meaningfully behind linear pro-rated pace. Mirrors
+// loadGoalPaceSignals (calls), but the goal entity is territory not rep —
+// matches the Phase B convention that sales goals live with the territory
+// (stable unit of market potential) and reps inherit credit via current_rep.
+//
+// Visibility: a rep sees pace warnings only for territories where they're
+// the current primary rep; managers see their team's territories; admins
+// see all (including territories with no current rep — those are admin-
+// actionable, "assign a rep before the period closes").
+// ---------------------------------------------------------------------------
+
+export async function loadSalesGoalPaceSignals(
+  tenantId: string,
+  userScope: UserScope,
+): Promise<Signal[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const todayMs = new Date(today).getTime();
+
+  // 1. Goals — current-period TERRITORY units goals from Postgres.
+  const goals = await db
+    .select({
+      entityId: schema.goal.entityId,
+      goalValue: schema.goal.goalValue,
+      periodStart: schema.goal.periodStart,
+      periodEnd: schema.goal.periodEnd,
+    })
+    .from(schema.goal)
+    .where(
+      and(
+        eq(schema.goal.tenantId, tenantId),
+        eq(schema.goal.metric, "units"),
+        eq(schema.goal.entityType, "territory"),
+        lte(schema.goal.periodStart, today),
+        gte(schema.goal.periodEnd, today),
+      ),
+    );
+  const goalsWithEntity = goals.filter(
+    (g): g is typeof g & { entityId: string } => g.entityId != null,
+  );
+  if (goalsWithEntity.length === 0) return [];
+
+  // 2. Resolve territory display info + current rep so we can both
+  //    visibility-filter and label the signal nicely.
+  const territoryKeyList = goalsWithEntity
+    .map((g) => `'${g.entityId.replace(/'/g, "''")}'`)
+    .join(",");
+  const territories = await queryFabric<{
+    territory_key: string;
+    name: string;
+    description: string | null;
+    current_rep_user_key: string | null;
+    current_rep_name: string | null;
+  }>(
+    tenantId,
+    `SELECT territory_key, name, description, current_rep_user_key, current_rep_name
+     FROM gold.dim_territory
+     WHERE tenant_id = @tenantId
+       AND territory_key IN (${territoryKeyList})`,
+  );
+  const tByKey = new Map(territories.map((t) => [t.territory_key, t]));
+
+  // 3. Visibility filter. Territories with no current rep are admin-only.
+  const visibleGoals = goalsWithEntity.filter((g) => {
+    const t = tByKey.get(g.entityId);
+    if (!t) return false; // Goal points at a territory not in dim_territory.
+    if (t.current_rep_user_key == null) {
+      return userScope.role === "admin" || userScope.role === "bypass";
+    }
+    return isUserKeyVisible(userScope, t.current_rep_user_key);
+  });
+  if (visibleGoals.length === 0) return [];
+
+  // 4. Actuals — sum of signed_units per territory for the goal period.
+  //    No fact_sale RLS clause needed: the goal-list filter above already
+  //    enforces visibility (current-state attribution means territory_key
+  //    aggregates and rep_user_key aggregates are equivalent).
+  const valuesList = visibleGoals
+    .map((g) => `('${g.entityId.replace(/'/g, "''")}','${g.periodStart}')`)
+    .join(",");
+  const actuals = await queryFabric<{
+    territory_key: string;
+    actual_units: number;
+  }>(
+    tenantId,
+    `WITH targets AS (
+       SELECT territory_key, CAST(period_start AS date) AS period_start
+       FROM (VALUES ${valuesList}) AS t(territory_key, period_start)
+     )
+     SELECT t.territory_key, COALESCE(SUM(f.signed_units), 0) AS actual_units
+     FROM targets t
+     LEFT JOIN gold.fact_sale f
+       ON f.tenant_id = @tenantId
+       AND f.territory_key = t.territory_key
+       AND f.transaction_date >= t.period_start
+       AND f.transaction_date <= CAST(GETDATE() AS date)
+     GROUP BY t.territory_key`,
+  );
+  const actualByKey = new Map(actuals.map((a) => [a.territory_key, a]));
+
+  // 5. Per goal: pace math + signal severity. Same thresholds as the
+  //    calls pace signal so the inbox stays visually consistent.
+  const signals: Signal[] = [];
+  for (const goal of visibleGoals) {
+    const t = tByKey.get(goal.entityId);
+    const actual = actualByKey.get(goal.entityId);
+    if (!t || !actual) continue;
+
+    const periodStartMs = new Date(goal.periodStart).getTime();
+    const periodEndMs = new Date(goal.periodEnd).getTime();
+    const totalDays = msToDays(periodEndMs - periodStartMs) + 1;
+    const elapsedDays = Math.min(
+      totalDays,
+      msToDays(todayMs - periodStartMs) + 1,
+    );
+    if (totalDays <= 0 || elapsedDays <= 0) continue;
+
+    const goalValue = Number(goal.goalValue);
+    const expectedPace = goalValue * (elapsedDays / totalDays);
+    const actualUnits = Number(actual.actual_units);
+    const ratio = expectedPace > 0 ? actualUnits / expectedPace : 1;
+    if (ratio >= PACE_WARN_THRESHOLD) continue;
+
+    const severity: SignalSeverity =
+      ratio < PACE_ALERT_THRESHOLD ? "alert" : "warning";
+    const remaining = Math.max(0, goalValue - actualUnits);
+    const daysLeft = Math.max(1, totalDays - elapsedDays);
+    const neededPerDay = Math.ceil(remaining / daysLeft);
+    const pctOfPace = Math.round(ratio * 100);
+    const periodLabel = formatPeriodShort(goal.periodStart, goal.periodEnd);
+
+    // Display: prefer description (geographic, e.g. "Los Angeles") over the
+    // code (e.g. "C103") per feedback_territory_display. Code rendered in
+    // parens when both exist so admins can still cross-reference Veeva.
+    const territoryLabel = t.description ?? t.name;
+    const codeChunk = t.description ? ` (${t.name})` : "";
+    const repChunk = t.current_rep_name
+      ? ` · ${t.current_rep_name}`
+      : " · no current rep";
+
+    signals.push({
+      type: "sales_goal_pace_behind",
+      severity,
+      title: `${territoryLabel}${codeChunk} — ${Math.round(actualUnits).toLocaleString("en-US")} of ${Math.round(goalValue).toLocaleString("en-US")} units (${pctOfPace}% of pace)`,
+      detail: `${periodLabel}${repChunk} · needs ${neededPerDay.toLocaleString("en-US")}/day for ${daysLeft} more day${daysLeft === 1 ? "" : "s"} to attain`,
+      // Drill to the current rep's page (where the same attainment + pace
+      // chart now render). If no rep, send admins to the goals admin so
+      // they can see the period + reassign. Reps can't reach this branch.
+      href: t.current_rep_user_key
+        ? `/reps/${encodeURIComponent(t.current_rep_user_key)}`
+        : "/admin/goals?metric=units",
+      rank: -ratio * 100,
+    });
+  }
+
+  signals.sort((a, b) => {
+    const sevOrder: Record<SignalSeverity, number> = {
+      alert: 0,
+      warning: 1,
+      info: 2,
+    };
+    const s = sevOrder[a.severity] - sevOrder[b.severity];
+    if (s !== 0) return s;
+    return a.rank - b.rank;
+  });
+
+  return signals.slice(0, MAX_SIGNALS);
+}
+
 function isUserKeyVisible(scope: UserScope, userKey: string): boolean {
   switch (scope.role) {
     case "admin":
@@ -483,13 +653,15 @@ export async function loadAllSignals(
   userScope: UserScope,
   sqlScope: Scope,
 ): Promise<SignalGroup[]> {
-  const [inactive, drop, overTargeted, pace, unmapped] = await Promise.all([
-    loadHcpInactivitySignals(tenantId, sqlScope),
-    loadActivityDropSignals(tenantId, sqlScope),
-    loadOverTargetingSignals(tenantId, sqlScope),
-    loadGoalPaceSignals(tenantId, userScope, sqlScope),
-    loadUnmappedAccountSignals(tenantId, userScope),
-  ]);
+  const [inactive, drop, overTargeted, pace, salesPace, unmapped] =
+    await Promise.all([
+      loadHcpInactivitySignals(tenantId, sqlScope),
+      loadActivityDropSignals(tenantId, sqlScope),
+      loadOverTargetingSignals(tenantId, sqlScope),
+      loadGoalPaceSignals(tenantId, userScope, sqlScope),
+      loadSalesGoalPaceSignals(tenantId, userScope),
+      loadUnmappedAccountSignals(tenantId, userScope),
+    ]);
 
   const isAdminLike =
     userScope.role === "admin" || userScope.role === "bypass";
@@ -515,6 +687,12 @@ export async function loadAllSignals(
       title: "Behind on goal pace",
       subtitle: `Reps below ${Math.round(PACE_WARN_THRESHOLD * 100)}% of pro-rated pace on their current call goal`,
       signals: pace,
+    },
+    {
+      key: "sales_goal_pace_behind",
+      title: "Behind on sales pace",
+      subtitle: `Territories below ${Math.round(PACE_WARN_THRESHOLD * 100)}% of pro-rated pace on their current units goal`,
+      signals: salesPace,
     },
     {
       key: "hcp_inactive_60d",

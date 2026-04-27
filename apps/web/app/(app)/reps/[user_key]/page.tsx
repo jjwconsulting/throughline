@@ -12,6 +12,7 @@ import {
   loadRepSalesTrend,
   loadRepTopHcos,
   loadRepCoverageHcos,
+  loadRepCurrentTerritoryKeys,
 } from "@/lib/sales";
 import {
   getCurrentScope,
@@ -128,12 +129,29 @@ export default async function RepDetail({
   // but harmless (they evaluate to the same row set).
   const sqlScope = combineScopes(repScope(user_key), scopeToSql(scope));
   const dateRange = rangeDates(filters.range);
+  // "Effective units goal" = sum of overlapping territory-entity goal
+  // portions for territories where this rep is the current primary rep.
+  // Current-state only — see loadRepCurrentTerritoryKeys docstring for
+  // the SCD2 limitation note.
+  const effectiveUnitsGoalLookup = dateRange
+    ? loadRepCurrentTerritoryKeys(tenantId, user_key).then((ids) =>
+        loadOverlappingGoalSum({
+          tenantId,
+          metric: "units",
+          entityType: "territory",
+          entityFilter: { type: "in", ids },
+          rangeStart: dateRange.start,
+          rangeEnd: dateRange.end,
+        }),
+      )
+    : Promise.resolve(null);
   const [
     kpis,
     trend,
     topHcps,
     inactivitySignals,
     proratedGoal,
+    effectiveUnitsGoal,
     repSalesKpis,
     repSalesTrend,
     repTopHcosBySales,
@@ -153,6 +171,7 @@ export default async function RepDetail({
             rangeEnd: dateRange.end,
           })
         : Promise.resolve(null),
+      effectiveUnitsGoalLookup,
       loadRepSalesKpis(tenantId, user_key, filters),
       loadRepSalesTrend(tenantId, user_key, filters),
       loadRepTopHcos(tenantId, user_key, filters, 10),
@@ -211,11 +230,24 @@ export default async function RepDetail({
       repSalesKpis.net_gross_dollars_period !== 0
         ? `${formatCompactDollars(repSalesKpis.net_gross_dollars_period)} net dollars`
         : null;
+    // Attainment vs effective goal takes the primary slot when present
+    // (matches Calls card behavior); dollars stays as supporting context;
+    // delta drops off because attainment is itself a comparison.
+    const repUnitsAttainment =
+      effectiveUnitsGoal != null && effectiveUnitsGoal > 0
+        ? attainmentLabel(
+            Math.round(repSalesKpis.net_units_period),
+            effectiveUnitsGoal,
+          ).label
+        : null;
     cards.push({
       label: `Net units (${period})`,
       value: formatNumber(Math.round(repSalesKpis.net_units_period)),
-      delta:
-        repSalesDollarsLine && repSalesUnitsDelta
+      delta: repUnitsAttainment
+        ? repSalesDollarsLine
+          ? `${repUnitsAttainment} · ${repSalesDollarsLine}`
+          : repUnitsAttainment
+        : repSalesDollarsLine && repSalesUnitsDelta
           ? `${repSalesDollarsLine} · ${repSalesUnitsDelta}`
           : repSalesDollarsLine ?? repSalesUnitsDelta,
     });
@@ -317,6 +349,14 @@ export default async function RepDetail({
                 valueKey="net_units"
                 valueLabel="Net units"
                 format="number"
+                goalTotal={effectiveUnitsGoal}
+                paceUnitLabel={
+                  filters.granularity === "week"
+                    ? "wk"
+                    : filters.granularity === "month"
+                      ? "mo"
+                      : "qtr"
+                }
               />
             </div>
           </div>
