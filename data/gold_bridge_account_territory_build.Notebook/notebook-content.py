@@ -35,12 +35,16 @@
 # in case future surfaces want them.
 #
 # Primary-pick ranking (per tenant, per account):
-#   1. dim_territory.team_role: SAM (Sales Account Manager) > KAD (Key
-#      Account Director) > ALL (catch-all, often MSL/general). Sales-team
-#      territories outrank medical / general for SALES attribution.
-#   2. is_manual = 'true' over rule-assigned (manual assignments are
+#   1. Has eligible Sales rep on the territory > no-rep. A no-rep
+#      territory can't actually credit anyone, so it should never beat
+#      a sister territory with a real rep regardless of team_role. (Bug
+#      caught 2026-04-27 with fennec — KAD-no-rep was winning over an
+#      ALL-with-rep sister, sending the HCO's sales to "Unattributed".)
+#   2. dim_territory.team_role: SAM (Sales Account Manager) > KAD (Key
+#      Account Director) > ALL (catch-all, often MSL/general).
+#   3. is_manual = 'true' over rule-assigned (manual assignments are
 #      typically primary coverage; rule-based often secondary).
-#   3. dim_territory.name alphabetical (deterministic tiebreaker).
+#   4. dim_territory.name alphabetical (deterministic tiebreaker).
 #
 # Schema notes:
 #   - account_key matches dim_hcp.hcp_key OR dim_hco.hco_key
@@ -99,7 +103,7 @@ WITH active_assignments AS (
 ),
 ranked AS (
   -- Primary-pick: for each (tenant, account_key), rank candidate
-  -- territory assignments per the docstring rules. rn=1 wins is_primary.
+  -- territory assignments. rn=1 wins is_primary.
   SELECT
     aa.*,
     dt.team_role,
@@ -107,13 +111,27 @@ ranked AS (
     ROW_NUMBER() OVER (
       PARTITION BY aa.tenant_id, aa.account_key
       ORDER BY
+        -- 1. Has eligible Sales rep beats no-rep. Without this, an
+        --    HCO whose top-team-role territory has no rep loses
+        --    attribution entirely even when a sister territory has a
+        --    real rep (observed 2026-04-27 with fennec data).
+        CASE WHEN dt.current_rep_user_key IS NULL THEN 1 ELSE 0 END,
+        -- 2. Team role: SAM (Sales Account Manager) > KAD (Key Account
+        --    Director) > ALL (catch-all) > MSL (medical, doesn't drive
+        --    sales). MSL is last since their territories shouldn't be
+        --    primary for sales attribution even when the rep filter
+        --    happens to allow them.
         CASE dt.team_role
           WHEN 'SAM' THEN 0
           WHEN 'KAD' THEN 1
           WHEN 'ALL' THEN 2
-          ELSE 3
+          WHEN 'MSL' THEN 3
+          ELSE 4
         END,
+        -- 3. Manual assignments over rule-assigned (manual is usually
+        --    primary coverage; rule is often default/secondary).
         CASE WHEN aa.is_manual = 'true' THEN 0 ELSE 1 END,
+        -- 4. Alphabetical by territory name (deterministic tiebreaker).
         dt.name ASC NULLS LAST
     ) AS rn
   FROM active_assignments aa

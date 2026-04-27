@@ -29,6 +29,7 @@ export const dynamic = "force-dynamic";
 
 type HcoHeader = {
   hco_key: string;
+  veeva_account_id: string;
   name: string;
   hco_type: string | null;
   hospital_type: string | null;
@@ -49,8 +50,9 @@ async function loadHco(
   const rows = await queryFabric<HcoHeader>(
     tenantId,
     `SELECT TOP 1
-       hco_key, name, hco_type, hospital_type, account_group,
-       city, state, postal_code, bed_count, tier, segmentation, status
+       hco_key, veeva_account_id, name, hco_type, hospital_type,
+       account_group, city, state, postal_code, bed_count, tier,
+       segmentation, status
      FROM gold.dim_hco
      WHERE tenant_id = @tenantId AND hco_key = @hcoKey`,
     { hcoKey },
@@ -64,7 +66,10 @@ async function loadHco(
 // data Phase A's gold_fact_sale_build uses to derive rep_user_key, so
 // admins can see exactly WHY their sales for this HCO go where they go.
 type HcoAttributionRow = {
-  is_primary: boolean;
+  // 1 if primary, 0 otherwise. Cast to int in SQL because the
+  // mssql/tedious driver can choke on Delta BOOLEAN over the SQL
+  // analytics endpoint depending on table version.
+  is_primary: number;
   territory_key: string;
   territory_name: string | null;
   team_role: string | null;
@@ -72,7 +77,7 @@ type HcoAttributionRow = {
   current_rep_name: string | null;
   current_rep_source: string | null;
   is_manual: string | null;
-  rule: string | null;
+  assignment_rule: string | null;
   assignment_name: string | null;
 };
 
@@ -83,8 +88,11 @@ async function loadHcoAttributionChain(
   try {
     return await queryFabric<HcoAttributionRow>(
       tenantId,
-      `SELECT
-         b.is_primary,
+      // `rule` is a T-SQL reserved keyword. The SQL analytics endpoint
+       // rejects it even though Delta/Spark accepts it. Bracket-quote on
+       // both the SELECT and the alias.
+       `SELECT
+         CAST(b.is_primary AS INT) AS is_primary,
          b.territory_key,
          t.name                  AS territory_name,
          t.team_role,
@@ -92,7 +100,7 @@ async function loadHcoAttributionChain(
          t.current_rep_name,
          t.current_rep_source,
          b.is_manual,
-         b.rule,
+         b.[rule]                AS assignment_rule,
          b.assignment_name
        FROM gold.bridge_account_territory b
        LEFT JOIN gold.dim_territory t
@@ -100,10 +108,11 @@ async function loadHcoAttributionChain(
          AND t.territory_key = b.territory_key
        WHERE b.tenant_id = @tenantId
          AND b.account_key = @hcoKey
-       ORDER BY b.is_primary DESC, t.name`,
+       ORDER BY CAST(b.is_primary AS INT) DESC, t.name`,
       { hcoKey },
     );
-  } catch {
+  } catch (err) {
+    console.error("loadHcoAttributionChain failed:", err);
     return [];
   }
 }
@@ -294,6 +303,10 @@ export default async function HcoDetail({
               {subtitleBits.join(" • ") || "—"}
               {hco.bed_count ? ` • ${hco.bed_count} beds` : ""}
             </p>
+            <p className="text-[var(--color-ink-muted)] text-xs mt-1">
+              <span className="text-[var(--color-ink-muted)]">Veeva ID:</span>{" "}
+              <span className="font-mono">{hco.veeva_account_id}</span>
+            </p>
             {hco.tier || hco.segmentation || hco.hospital_type ? (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {hco.tier ? (
@@ -434,18 +447,26 @@ export default async function HcoDetail({
         </>
       ) : null}
 
-      {attributionChain.length > 0 ? (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Sales attribution</h2>
-            <p className="text-xs text-[var(--color-ink-muted)]">
-              Which territory + rep this account&apos;s sales roll up to.
-              Set in Veeva via account-territory assignments. The{" "}
-              <span className="font-medium">Primary</span> row is the one
-              dashboard sales aggregates use.
-            </p>
+      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+        <div className="px-5 py-4 border-b border-[var(--color-border)]">
+          <h2 className="font-display text-lg">Sales attribution</h2>
+          <p className="text-xs text-[var(--color-ink-muted)]">
+            Which territory + rep this account&apos;s sales roll up to.
+            Set in Veeva via account-territory assignments. The{" "}
+            <span className="font-medium">Primary</span> row is the one
+            dashboard sales aggregates use.
+          </p>
+        </div>
+        {attributionChain.length === 0 ? (
+          <div className="px-5 py-6 text-sm text-[var(--color-ink-muted)]">
+            No territory assignments found for this account in Veeva. Sales
+            for this HCO will roll up under <span className="italic">Unattributed</span>{" "}
+            on the dashboard until an admin assigns it to a territory in
+            Veeva (and a Sales-typed rep is on that territory).
           </div>
-          <table className="w-full text-sm">
+        ) : (
+        <>
+        <table className="w-full text-sm">
             <thead className="text-xs text-[var(--color-ink-muted)]">
               <tr>
                 <th className="text-left font-normal px-5 py-2 w-20">Primary</th>
@@ -461,13 +482,13 @@ export default async function HcoDetail({
                   key={a.territory_key}
                   className={
                     "border-t border-[var(--color-border)] " +
-                    (a.is_primary
+                    (a.is_primary === 1
                       ? "bg-[var(--color-positive)]/5"
                       : "")
                   }
                 >
                   <td className="px-5 py-2">
-                    {a.is_primary ? (
+                    {a.is_primary === 1 ? (
                       <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
                         Primary
                       </span>
@@ -498,20 +519,40 @@ export default async function HcoDetail({
                     )}
                   </td>
                   <td className="px-5 py-2 text-[var(--color-ink-muted)] text-xs">
-                    {a.is_manual === "true" ? "Manual" : (a.rule ?? "—")}
+                    {/* Veeva sends manual__v as a string; sometimes "true",
+                        sometimes "True", sometimes "1". Normalize. */}
+                    {(() => {
+                      const m = (a.is_manual ?? "").toLowerCase();
+                      const isManual = m === "true" || m === "1" || m === "yes";
+                      if (isManual) return "Manual";
+                      if (a.assignment_rule) return `Rule: ${a.assignment_rule}`;
+                      return "—";
+                    })()}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="px-5 py-3 text-xs text-[var(--color-ink-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface-alt)]/40">
-            <strong className="text-[var(--color-ink)]">To change:</strong>{" "}
-            edit the account-territory assignment in Veeva (or assign a
-            Sales-typed user to the territory if no rep is shown). Changes
-            flow into Throughline on the next pipeline refresh.
+          <div className="px-5 py-3 text-xs text-[var(--color-ink-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface-alt)]/40 space-y-1">
+            <p>
+              <strong className="text-[var(--color-ink)]">How primary is picked:</strong>{" "}
+              when an account is assigned to multiple territories (Veeva
+              supports this), Throughline picks one as primary for sales
+              attribution using this priority — territories with an
+              assigned Sales rep first, then team role (SAM &gt; KAD &gt;
+              ALL), then manual-over-rule assignments, then alphabetical
+              by territory name.
+            </p>
+            <p>
+              <strong className="text-[var(--color-ink)]">To change:</strong>{" "}
+              edit the account-territory assignment in Veeva (or assign a
+              Sales-typed user to the territory if no rep is shown). Changes
+              flow into Throughline on the next pipeline refresh.
+            </p>
           </div>
-        </div>
-      ) : null}
+        </>
+        )}
+      </div>
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">

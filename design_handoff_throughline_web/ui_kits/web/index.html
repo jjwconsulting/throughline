@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Throughline · Web UI Kit</title>
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--color-background); color: var(--color-ink); }
+  select:focus, input:focus { box-shadow: 0 0 0 2px var(--color-primary); }
+  a { color: var(--color-primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="Icons.jsx"></script>
+<script type="text/babel" src="Primitives.jsx"></script>
+<script type="text/babel" src="Nav.jsx"></script>
+<script type="text/babel" src="Panels.jsx"></script>
+<script type="text/babel" src="Screens.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ----- Tweaks: brand name + 3 color palettes -----
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "brand": "Throughline",
+  "palette": "forest",
+  "accent": "gold"
+}/*EDITMODE-END*/;
+
+// Each palette overrides primary + ink + canvas. Accent is a separate dial so
+// the user can mix-and-match.
+const PALETTES = {
+  forest: {
+    label: "Forest (current)",
+    "--color-background": "#FAFAF7",
+    "--color-surface":    "#FFFFFF",
+    "--color-surface-alt":"#F3F2EE",
+    "--color-ink":        "#1C1B19",
+    "--color-ink-muted":  "#5A564E",
+    "--color-primary":      "#1F4E46",
+    "--color-primary-hover":"#173A33",
+    "--color-border":     "#E5E3DB",
+  },
+  ink: {
+    label: "Ink (clinical)",
+    "--color-background": "#F7F8FA",
+    "--color-surface":    "#FFFFFF",
+    "--color-surface-alt":"#EEF1F5",
+    "--color-ink":        "#0F172A",
+    "--color-ink-muted":  "#52607A",
+    "--color-primary":      "#1E3A8A",
+    "--color-primary-hover":"#172E6E",
+    "--color-border":     "#DCE2EB",
+  },
+  plum: {
+    label: "Plum (warmer)",
+    "--color-background": "#FAF7F7",
+    "--color-surface":    "#FFFFFF",
+    "--color-surface-alt":"#F2EDED",
+    "--color-ink":        "#1F1A1C",
+    "--color-ink-muted":  "#5E5258",
+    "--color-primary":      "#5C2A4A",
+    "--color-primary-hover":"#451F38",
+    "--color-border":     "#E5DEDF",
+  },
+  graphite: {
+    label: "Graphite (neutral)",
+    "--color-background": "#F7F7F7",
+    "--color-surface":    "#FFFFFF",
+    "--color-surface-alt":"#EEEEEE",
+    "--color-ink":        "#171717",
+    "--color-ink-muted":  "#525252",
+    "--color-primary":      "#262626",
+    "--color-primary-hover":"#0A0A0A",
+    "--color-border":     "#DBDBDB",
+  },
+};
+
+const ACCENTS = {
+  gold:  { label: "Gold (current)",  "--color-accent": "#C89B4A" },
+  rust:  { label: "Rust",            "--color-accent": "#B5531C" },
+  teal:  { label: "Teal",            "--color-accent": "#2D8A86" },
+  coral: { label: "Coral",           "--color-accent": "#D8624D" },
+};
+
+function applyPalette(paletteKey, accentKey) {
+  const root = document.documentElement;
+  const p = PALETTES[paletteKey] || PALETTES.forest;
+  const a = ACCENTS[accentKey] || ACCENTS.gold;
+  Object.entries(p).forEach(([k, v]) => { if (k.startsWith("--")) root.style.setProperty(k, v); });
+  Object.entries(a).forEach(([k, v]) => { if (k.startsWith("--")) root.style.setProperty(k, v); });
+}
+
+function App() {
+  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [route, setRoute] = useState("landing");
+  const [filters, setFilters] = useState({ range: "30d", channel: "all", account: "all" });
+
+  // Apply palette on every change
+  useEffect(() => {
+    applyPalette(tweaks.palette, tweaks.accent);
+  }, [tweaks.palette, tweaks.accent]);
+
+  const go = (r) => { setRoute(r); window.scrollTo({ top: 0 }); };
+
+  let content = null;
+  if (route === "landing") content = <Landing brand={tweaks.brand} go={go} />;
+  else if (route === "dashboard") content = <Dashboard go={go} state={filters} setState={setFilters} />;
+  else if (route === "inbox") content = <Inbox go={go} />;
+  else if (route === "hcp") content = <HcpDetail go={go} state={filters} setState={setFilters} />;
+  else if (route === "rep") content = <RepDetail go={go} state={filters} setState={setFilters} />;
+  else if (route === "admin") content = <AdminTenants />;
+  else if (route === "admin/users") content = <AdminUsers />;
+  else if (route === "admin/mappings") content = <AdminMappings />;
+  else if (route === "admin/goals") content = <AdminGoals />;
+  else if (route === "admin/pipelines") content = <AdminPipelines />;
+  else if (route === "reports" || route === "settings") {
+    content = <ComingSoon title={route[0].toUpperCase() + route.slice(1)} />;
+  }
+
+  return (
+    <div data-screen-label={route} style={{ minHeight: "100vh" }}>
+      {route === "landing" ? (
+        <>
+          <Nav brand={tweaks.brand} route={route} go={go} />
+          {content}
+        </>
+      ) : (
+        <>
+          <Nav brand={tweaks.brand} route={route} go={go} scopeBadge="Manager · Northeast" />
+          <main style={{ maxWidth: 1152, margin: "0 auto", padding: "32px 24px" }}>
+            {content}
+          </main>
+        </>
+      )}
+
+      <TweaksPanel>
+        <TweakSection title="Brand">
+          <TweakText label="Wordmark" value={tweaks.brand} onChange={(v) => setTweak("brand", v)} />
+        </TweakSection>
+        <TweakSection title="Palette">
+          <TweakSelect
+            label="Primary"
+            value={tweaks.palette}
+            onChange={(v) => setTweak("palette", v)}
+            options={Object.entries(PALETTES).map(([k, v]) => ({ value: k, label: v.label }))}
+          />
+          <TweakSelect
+            label="Accent"
+            value={tweaks.accent}
+            onChange={(v) => setTweak("accent", v)}
+            options={Object.entries(ACCENTS).map(([k, v]) => ({ value: k, label: v.label }))}
+          />
+          <PaletteSwatches palette={tweaks.palette} accent={tweaks.accent} />
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+function PaletteSwatches({ palette, accent }) {
+  const p = PALETTES[palette] || PALETTES.forest;
+  const a = ACCENTS[accent] || ACCENTS.gold;
+  const items = [
+    ["Primary",  p["--color-primary"]],
+    ["Ink",      p["--color-ink"]],
+    ["Canvas",   p["--color-background"]],
+    ["Accent",   a["--color-accent"]],
+  ];
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+      {items.map(([label, color]) => (
+        <div key={label} style={{ flex: 1, textAlign: "center" }}>
+          <div style={{
+            height: 28, borderRadius: 4,
+            background: color,
+            border: "1px solid var(--color-border)",
+          }} />
+          <div style={{ fontSize: 10, color: "var(--color-ink-muted)", marginTop: 4 }}>{label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ComingSoon({ title }) {
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: 30, margin: 0, fontWeight: 400 }}>{title}</h1>
+      <p style={{ color: "var(--color-ink-muted)", marginTop: 4 }}>Not yet wired. See README "Build state" for what's live.</p>
+      <div style={{
+        marginTop: 24,
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: 48,
+        textAlign: "center",
+      }}>
+        <p style={{ fontWeight: 500, margin: 0 }}>Coming soon</p>
+        <p style={{ fontSize: 13, color: "var(--color-ink-muted)", margin: "8px auto 0", maxWidth: 420 }}>
+          This surface isn't built yet. Track progress in the "Still open" section of the repo README.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

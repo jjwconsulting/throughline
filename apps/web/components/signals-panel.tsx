@@ -1,20 +1,24 @@
 import Link from "next/link";
 import type { Signal, SignalSeverity } from "@/lib/signals";
+import { Icon, type IconName } from "./icon";
 
 const severityStyles: Record<
   SignalSeverity,
-  { dot: string; label: string }
+  { icon: IconName; color: string; label: string }
 > = {
   alert: {
-    dot: "bg-[var(--color-negative)]",
+    icon: "alertTri",
+    color: "var(--color-negative)",
     label: "Alert",
   },
   warning: {
-    dot: "bg-[var(--color-accent)]",
+    icon: "clock",
+    color: "var(--color-accent)",
     label: "Warning",
   },
   info: {
-    dot: "bg-[var(--color-primary)]",
+    icon: "mapPin",
+    color: "var(--color-primary)",
     label: "Info",
   },
 };
@@ -63,8 +67,11 @@ export default function SignalsPanel({
                     <span
                       aria-label={sev.label}
                       title={sev.label}
-                      className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${sev.dot}`}
-                    />
+                      className="inline-flex items-center justify-center h-6 w-6 rounded-md bg-[var(--color-surface-alt)] shrink-0"
+                      style={{ color: sev.color }}
+                    >
+                      <Icon name={sev.icon} size={14} strokeWidth={1.75} />
+                    </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-[var(--color-ink)] truncate">
                         {s.title}
@@ -75,6 +82,11 @@ export default function SignalsPanel({
                         </p>
                       ) : null}
                     </div>
+                    <Icon
+                      name="arrowRight"
+                      size={14}
+                      className="text-[var(--color-ink-muted)] mt-1 shrink-0"
+                    />
                   </div>
                 </Link>
               </li>

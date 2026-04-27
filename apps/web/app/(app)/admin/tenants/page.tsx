@@ -80,7 +80,17 @@ export default async function TenantsPage() {
                 >
                   <td className="px-4 py-2 font-mono">{t.slug}</td>
                   <td className="px-4 py-2">{t.name}</td>
-                  <td className="px-4 py-2">{t.status}</td>
+                  <td className="px-4 py-2">
+                    <span
+                      className={
+                        t.status === "active"
+                          ? "inline-block text-xs rounded px-2 py-0.5 bg-[color-mix(in_srgb,var(--color-accent)_15%,var(--color-surface))] text-[var(--color-accent)] border border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
+                          : "inline-block text-xs rounded px-2 py-0.5 bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)] border border-[var(--color-border)]"
+                      }
+                    >
+                      {t.status}
+                    </span>
+                  </td>
                   <td className="px-4 py-2 text-[var(--color-ink-muted)]">
                     {t.createdAt.toISOString().slice(0, 10)}
                   </td>

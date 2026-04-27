@@ -106,9 +106,12 @@ export async function loadInteractionKpis(
          AND f.call_date <= @kpiPeriodEnd
          ${channelFilter} ${accountFilter} ${scopeSql(scope)}
      )
+     -- COALESCE on SUMs because they return NULL (not 0) when window_scope
+     -- is empty for this RLS scope (e.g., a rep visiting an HCO they don't
+     -- cover). COUNTs naturally return 0 so no wrap needed there.
      SELECT
-       SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN 1 ELSE 0 END) AS calls_period,
-       SUM(CASE WHEN w.call_date >= @kpiPriorStart AND w.call_date <= @kpiPriorEnd THEN 1 ELSE 0 END) AS calls_prior,
+       COALESCE(SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN 1 ELSE 0 END), 0) AS calls_period,
+       COALESCE(SUM(CASE WHEN w.call_date >= @kpiPriorStart AND w.call_date <= @kpiPriorEnd THEN 1 ELSE 0 END), 0) AS calls_prior,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hcp_key END) AS hcps,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hco_key END) AS hcos,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.owner_user_key END) AS reps,

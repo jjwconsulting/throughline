@@ -77,15 +77,29 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
 ) USING DELTA
 """)
 
-# Tenant-specific rules for deriving team role from territory description.
-# Fennec encodes team in description text: '...SAM...' = Sales Account Manager,
-# '...KAD...' = Key Account Director, else = ALL (catch-all for MSL/general).
-# Other tenants will have their own conventions; this dict is the seam for
-# adding their rules. Long-term: move to a config table per tenant.
-TEAM_ROLE_RULES: dict[str, list[tuple[str, str]]] = {
+# Tenant-specific rules for deriving team_role from territory metadata.
+# Each rule: (silver_field, LIKE_pattern, role). First match wins, so
+# ORDER MATTERS — put more-specific rules first.
+#
+# Fennec convention (per James 2026-04-27):
+#   - name LIKE 'M%'   = MSL  (medical territories)
+#   - name LIKE 'C8%'  = KAD  (key account director — must come BEFORE C%)
+#   - name LIKE 'C%'   = SAM  (sales account manager — catches C[non-8]*)
+#   - description fallback (legacy '%SAM%' / '%KAD%' for any tenant
+#     that encodes team in description text)
+#
+# These are tenant-specific encodings baked into shared code — known
+# debt. Future direction: move to a per-tenant `tenant_team_role_rules`
+# config table editable from the admin UI, so onboarding a new tenant
+# doesn't require a notebook deploy. Tracked in memory:
+# project_pipeline_architecture.
+TEAM_ROLE_RULES: dict[str, list[tuple[str, str, str]]] = {
     "veeva": [
-        ("%SAM%", "SAM"),
-        ("%KAD%", "KAD"),
+        ("name",        "M%",    "MSL"),
+        ("name",        "C8%",   "KAD"),
+        ("name",        "C%",    "SAM"),
+        ("description", "%SAM%", "SAM"),
+        ("description", "%KAD%", "KAD"),
     ],
 }
 TEAM_ROLE_DEFAULT = "ALL"
@@ -188,17 +202,28 @@ def build_group_select(
         else:
             projections.append(f"  CAST(NULL AS STRING) AS {silver_col}")
 
-    # Derive team_role from description per per-source rules.
-    # If no description column is mapped, default to TEAM_ROLE_DEFAULT.
-    description_bronze_col = col_map.get("description")
+    # Derive team_role per source-specific rules. Rules are
+    # (silver_field, LIKE_pattern, role) — we resolve silver_field to
+    # the bronze column via col_map, then build a CASE WHEN chain in
+    # rule order. Rules whose field isn't mapped are silently skipped
+    # (so a tenant without `description` mapped still gets name-based
+    # rules applied).
     rules = TEAM_ROLE_RULES.get(source_system, [])
-    if description_bronze_col and rules:
-        when_clauses = "\n           ".join(
-            f"WHEN UPPER(ranked.`{description_bronze_col}`) LIKE '{pattern}' THEN '{role}'"
-            for pattern, role in rules
+    when_clauses: list[str] = []
+    for silver_field, pattern, role in rules:
+        bronze_col = col_map.get(silver_field)
+        if not bronze_col:
+            continue
+        # UPPER() on both sides for case-insensitive matching. Patterns
+        # in TEAM_ROLE_RULES are written as the user expects to see them
+        # (e.g., 'M%' or '%SAM%'), upper-cased here for the comparison.
+        when_clauses.append(
+            f"WHEN UPPER(ranked.`{bronze_col}`) LIKE UPPER('{pattern}') THEN '{role}'"
         )
+    if when_clauses:
+        case_body = "\n           ".join(when_clauses)
         projections.append(
-            f"  CASE\n           {when_clauses}\n           "
+            f"  CASE\n           {case_body}\n           "
             f"ELSE '{TEAM_ROLE_DEFAULT}'\n         END AS team_role"
         )
     else:

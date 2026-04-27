@@ -1,6 +1,7 @@
 import { generateInsightBrief } from "@/lib/insight-brief";
 import type { SignalGroup } from "@/lib/signals";
 import type { UserScope } from "@/lib/scope";
+import { Icon } from "@/components/icon";
 
 // Server component rendered inside <Suspense> so the rest of the inbox
 // streams immediately and this card resolves when the LLM call returns.
@@ -35,11 +36,9 @@ export default async function InsightBrief({
 
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="h-2 w-2 rounded-full bg-[var(--color-accent)]" />
-        <p className="text-xs uppercase tracking-wider text-[var(--color-ink-muted)]">
-          Briefing
-        </p>
+      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent)]">
+        <Icon name="sparkles" size={14} />
+        <p className="text-xs uppercase tracking-wider">Briefing</p>
       </div>
       <p className="text-sm text-[var(--color-ink)] leading-relaxed">
         {result.brief}
@@ -51,11 +50,9 @@ export default async function InsightBrief({
 export function InsightBriefLoading() {
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="h-2 w-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
-        <p className="text-xs uppercase tracking-wider text-[var(--color-ink-muted)]">
-          Briefing
-        </p>
+      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent)]">
+        <Icon name="sparkles" size={14} className="animate-pulse" />
+        <p className="text-xs uppercase tracking-wider">Briefing</p>
       </div>
       <p className="text-sm text-[var(--color-ink-muted)] italic">
         Reading your signals…
