@@ -117,6 +117,43 @@ def _update_pipeline_run_status(run_id, status):
         print(f"⚠ pipeline_run status update failed: {exc}")
 
 
+def find_recent_queued_run(kind, max_age_minutes=5):
+    """
+    Polling-based adoption of a recently-queued web-triggered run.
+    Fabric's parameter cell mechanism strips the "parameters" tag on
+    git-sync round-trips, so the web → notebook handoff via
+    executionData.parameters is unreliable. Instead, the web action
+    inserts the row at status='queued', and the notebook polls here at
+    startup to find + adopt it. Falls back to creating a fresh row if
+    no queued row is found.
+
+    max_age_minutes guards against adopting stale rows (e.g. from a web
+    trigger whose notebook job never started due to capacity).
+    """
+    from datetime import timedelta
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{PIPELINE_RUN_TABLE}",
+            headers=_SUPABASE_HEADERS,
+            params={
+                "kind":       f"eq.{kind}",
+                "status":     "eq.queued",
+                "created_at": f"gte.{cutoff}",
+                "order":      "created_at.desc",
+                "limit":      "1",
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if rows:
+            return rows[0]
+    except Exception as exc:
+        print(f"⚠ find_recent_queued_run failed: {exc}")
+    return None
+
+
 def run_step(step_name, timeout_s=600):
     start = time.time()
     try:
@@ -193,6 +230,19 @@ triggered_by = "schedule"
 # META }
 
 # CELL ********************
+
+# Adopt a web-triggered queued row if one exists (within last 5 min).
+# This is the primary handoff mechanism since Fabric strips the
+# parameter cell tag on git-sync. The parameter cell above is kept as a
+# secondary path in case Fabric ever fixes parameter passing, but we
+# don't depend on it.
+if not pipeline_run_id:
+    adopted = find_recent_queued_run("mapping_propagate")
+    if adopted:
+        pipeline_run_id = adopted["id"]
+        tenant_id      = adopted.get("tenant_id") or tenant_id
+        triggered_by   = adopted.get("triggered_by") or triggered_by
+        print(f"adopted recent queued row {pipeline_run_id} (triggered_by={triggered_by})")
 
 run_orchestrator(
     pipeline_kind="mapping_propagate",
