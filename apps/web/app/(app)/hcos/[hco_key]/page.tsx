@@ -58,6 +58,56 @@ async function loadHco(
   return rows[0] ?? null;
 }
 
+// Attribution chain for an HCO: which territories it's bridged to (with
+// is_primary flag for sales-attribution purposes), each territory's
+// current Sales rep, and the team_role / source. Surfaces the same
+// data Phase A's gold_fact_sale_build uses to derive rep_user_key, so
+// admins can see exactly WHY their sales for this HCO go where they go.
+type HcoAttributionRow = {
+  is_primary: boolean;
+  territory_key: string;
+  territory_name: string | null;
+  team_role: string | null;
+  current_rep_user_key: string | null;
+  current_rep_name: string | null;
+  current_rep_source: string | null;
+  is_manual: string | null;
+  rule: string | null;
+  assignment_name: string | null;
+};
+
+async function loadHcoAttributionChain(
+  tenantId: string,
+  hcoKey: string,
+): Promise<HcoAttributionRow[]> {
+  try {
+    return await queryFabric<HcoAttributionRow>(
+      tenantId,
+      `SELECT
+         b.is_primary,
+         b.territory_key,
+         t.name                  AS territory_name,
+         t.team_role,
+         t.current_rep_user_key,
+         t.current_rep_name,
+         t.current_rep_source,
+         b.is_manual,
+         b.rule,
+         b.assignment_name
+       FROM gold.bridge_account_territory b
+       LEFT JOIN gold.dim_territory t
+         ON t.tenant_id = b.tenant_id
+         AND t.territory_key = b.territory_key
+       WHERE b.tenant_id = @tenantId
+         AND b.account_key = @hcoKey
+       ORDER BY b.is_primary DESC, t.name`,
+      { hcoKey },
+    );
+  } catch {
+    return [];
+  }
+}
+
 // Reps who've called this HCO (mirrors HCP page's calling-reps panel).
 type CallingRep = {
   user_key: string;
@@ -153,15 +203,23 @@ export default async function HcoDetail({
   // param). Reps see only their attributed sales for this HCO; admins
   // see tenant-wide sales for it.
   const userSqlScope = scopeToSql(userScope);
-  const [kpis, trend, callingReps, salesKpis, salesTrend, topProducts] =
-    await Promise.all([
-      loadInteractionKpis(tenantId, filters, sqlScope),
-      loadTrend(tenantId, filters, sqlScope),
-      loadHcoCallingReps(tenantId, filters, sqlScope),
-      loadHcoSalesKpis(tenantId, hco_key, filters, userSqlScope),
-      loadHcoSalesTrend(tenantId, hco_key, filters, userSqlScope),
-      loadHcoTopProducts(tenantId, hco_key, filters, 10, userSqlScope),
-    ]);
+  const [
+    kpis,
+    trend,
+    callingReps,
+    salesKpis,
+    salesTrend,
+    topProducts,
+    attributionChain,
+  ] = await Promise.all([
+    loadInteractionKpis(tenantId, filters, sqlScope),
+    loadTrend(tenantId, filters, sqlScope),
+    loadHcoCallingReps(tenantId, filters, sqlScope),
+    loadHcoSalesKpis(tenantId, hco_key, filters, userSqlScope),
+    loadHcoSalesTrend(tenantId, hco_key, filters, userSqlScope),
+    loadHcoTopProducts(tenantId, hco_key, filters, 10, userSqlScope),
+    loadHcoAttributionChain(tenantId, hco_key),
+  ]);
 
   // Show the sales-related surfaces only when this HCO actually has sales
   // history. New tenants (or HCOs that have never been a ship-to) get the
@@ -193,16 +251,24 @@ export default async function HcoDetail({
     },
   ];
   if (hasSalesHistory) {
+    const hcoSalesUnitsDelta =
+      filters.range !== "all" && salesKpis.net_units_prior !== 0
+        ? deltaLabel(
+            salesKpis.net_units_period,
+            salesKpis.net_units_prior,
+          )
+        : null;
+    const hcoSalesDollarsLine =
+      salesKpis.net_gross_dollars_period !== 0
+        ? `${formatCompactDollars(salesKpis.net_gross_dollars_period)} net dollars`
+        : null;
     cards.push({
-      label: `Net sales (${period})`,
-      value: formatCompactDollars(salesKpis.net_gross_dollars_period),
+      label: `Net units (${period})`,
+      value: formatNumber(Math.round(salesKpis.net_units_period)),
       delta:
-        filters.range !== "all" && salesKpis.net_gross_dollars_prior !== 0
-          ? deltaLabel(
-              salesKpis.net_gross_dollars_period,
-              salesKpis.net_gross_dollars_prior,
-            )
-          : null,
+        hcoSalesDollarsLine && hcoSalesUnitsDelta
+          ? `${hcoSalesDollarsLine} · ${hcoSalesUnitsDelta}`
+          : hcoSalesDollarsLine ?? hcoSalesUnitsDelta,
     });
   }
 
@@ -295,10 +361,10 @@ export default async function HcoDetail({
           <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
             <div className="px-5 py-4 border-b border-[var(--color-border)]">
               <h2 className="font-display text-lg">
-                Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+                Net units — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
               </h2>
               <p className="text-xs text-[var(--color-ink-muted)]">
-                Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+                Signed units (sales − returns), {chartBuckets(filters)}{" "}
                 most recent {filters.granularity}
                 {chartBuckets(filters) === 1 ? "" : "s"} for {hco.name}
                 {salesKpis.last_sale ? (
@@ -311,9 +377,9 @@ export default async function HcoDetail({
             <div className="px-2 py-4">
               <TrendChart
                 data={salesTrend}
-                valueKey="net_dollars"
-                valueLabel="Net sales"
-                format="dollars"
+                valueKey="net_units"
+                valueLabel="Net units"
+                format="number"
               />
             </div>
           </div>
@@ -323,7 +389,7 @@ export default async function HcoDetail({
               <div className="px-5 py-4 border-b border-[var(--color-border)]">
                 <h2 className="font-display text-lg">Top products</h2>
                 <p className="text-xs text-[var(--color-ink-muted)]">
-                  By net sales in {period} for {hco.name}
+                  By units in {period} for {hco.name}
                 </p>
               </div>
               <table className="w-full text-sm">
@@ -333,8 +399,8 @@ export default async function HcoDetail({
                     <th className="text-left font-normal px-5 py-2">Product</th>
                     <th className="text-left font-normal px-5 py-2">NDC</th>
                     <th className="text-left font-normal px-5 py-2">Brand</th>
-                    <th className="text-right font-normal px-5 py-2">Net sales</th>
                     <th className="text-right font-normal px-5 py-2">Units</th>
+                    <th className="text-right font-normal px-5 py-2">Net dollars</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -354,10 +420,10 @@ export default async function HcoDetail({
                         {p.brand ?? "—"}
                       </td>
                       <td className="px-5 py-2 text-right font-mono">
-                        {formatCompactDollars(p.net_gross_dollars)}
+                        {formatNumber(Math.round(p.net_units))}
                       </td>
                       <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                        {formatNumber(Math.round(p.net_units))}
+                        {formatCompactDollars(p.net_gross_dollars)}
                       </td>
                     </tr>
                   ))}
@@ -366,6 +432,85 @@ export default async function HcoDetail({
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {attributionChain.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">Sales attribution</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Which territory + rep this account&apos;s sales roll up to.
+              Set in Veeva via account-territory assignments. The{" "}
+              <span className="font-medium">Primary</span> row is the one
+              dashboard sales aggregates use.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-20">Primary</th>
+                <th className="text-left font-normal px-5 py-2">Territory</th>
+                <th className="text-left font-normal px-5 py-2">Team role</th>
+                <th className="text-left font-normal px-5 py-2">Current Sales rep</th>
+                <th className="text-left font-normal px-5 py-2">Assignment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {attributionChain.map((a) => (
+                <tr
+                  key={a.territory_key}
+                  className={
+                    "border-t border-[var(--color-border)] " +
+                    (a.is_primary
+                      ? "bg-[var(--color-positive)]/5"
+                      : "")
+                  }
+                >
+                  <td className="px-5 py-2">
+                    {a.is_primary ? (
+                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+                        Primary
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[var(--color-ink-muted)]">
+                        Secondary
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-2">
+                    {a.territory_name ?? a.territory_key.slice(0, 8) + "…"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)] text-xs">
+                    {a.team_role ?? "—"}
+                  </td>
+                  <td className="px-5 py-2">
+                    {a.current_rep_user_key ? (
+                      <Link
+                        href={`/reps/${encodeURIComponent(a.current_rep_user_key)}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {a.current_rep_name ?? "—"}
+                      </Link>
+                    ) : (
+                      <span className="text-[var(--color-ink-muted)] italic">
+                        No Sales rep assigned to this territory
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)] text-xs">
+                    {a.is_manual === "true" ? "Manual" : (a.rule ?? "—")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="px-5 py-3 text-xs text-[var(--color-ink-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface-alt)]/40">
+            <strong className="text-[var(--color-ink)]">To change:</strong>{" "}
+            edit the account-territory assignment in Veeva (or assign a
+            Sales-typed user to the territory if no rep is shown). Changes
+            flow into Throughline on the next pipeline refresh.
+          </div>
+        </div>
       ) : null}
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">

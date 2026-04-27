@@ -195,16 +195,24 @@ export default async function RepDetail({
     },
   ];
   if (hasSalesHistory) {
+    const repSalesUnitsDelta =
+      filters.range !== "all" && repSalesKpis.net_units_prior !== 0
+        ? deltaLabel(
+            repSalesKpis.net_units_period,
+            repSalesKpis.net_units_prior,
+          )
+        : null;
+    const repSalesDollarsLine =
+      repSalesKpis.net_gross_dollars_period !== 0
+        ? `${formatCompactDollars(repSalesKpis.net_gross_dollars_period)} net dollars`
+        : null;
     cards.push({
-      label: `Net sales (${period})`,
-      value: formatCompactDollars(repSalesKpis.net_gross_dollars_period),
+      label: `Net units (${period})`,
+      value: formatNumber(Math.round(repSalesKpis.net_units_period)),
       delta:
-        filters.range !== "all" && repSalesKpis.net_gross_dollars_prior !== 0
-          ? deltaLabel(
-              repSalesKpis.net_gross_dollars_period,
-              repSalesKpis.net_gross_dollars_prior,
-            )
-          : null,
+        repSalesDollarsLine && repSalesUnitsDelta
+          ? `${repSalesDollarsLine} · ${repSalesUnitsDelta}`
+          : repSalesDollarsLine ?? repSalesUnitsDelta,
     });
   }
 
@@ -287,10 +295,10 @@ export default async function RepDetail({
           <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
             <div className="px-5 py-4 border-b border-[var(--color-border)]">
               <h2 className="font-display text-lg">
-                Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+                Net units — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
               </h2>
               <p className="text-xs text-[var(--color-ink-muted)]">
-                Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+                Signed units (sales − returns), {chartBuckets(filters)}{" "}
                 most recent {filters.granularity}
                 {chartBuckets(filters) === 1 ? "" : "s"} attributed to {rep.name}
                 {repSalesKpis.last_sale ? (
@@ -301,9 +309,9 @@ export default async function RepDetail({
             <div className="px-2 py-4">
               <TrendChart
                 data={repSalesTrend}
-                valueKey="net_dollars"
-                valueLabel="Net sales"
-                format="dollars"
+                valueKey="net_units"
+                valueLabel="Net units"
+                format="number"
               />
             </div>
           </div>
@@ -311,7 +319,7 @@ export default async function RepDetail({
           {repTopHcosBySales.length > 0 ? (
             <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
               <div className="px-5 py-4 border-b border-[var(--color-border)]">
-                <h2 className="font-display text-lg">Top HCOs by Net Sales</h2>
+                <h2 className="font-display text-lg">Top HCOs by Units</h2>
                 <p className="text-xs text-[var(--color-ink-muted)]">
                   Top accounts in {period} for {rep.name}
                 </p>
@@ -323,8 +331,8 @@ export default async function RepDetail({
                     <th className="text-left font-normal px-5 py-2">HCO</th>
                     <th className="text-left font-normal px-5 py-2">Type</th>
                     <th className="text-left font-normal px-5 py-2">Location</th>
-                    <th className="text-right font-normal px-5 py-2">Net sales</th>
                     <th className="text-right font-normal px-5 py-2">Units</th>
+                    <th className="text-right font-normal px-5 py-2">Net dollars</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -351,10 +359,10 @@ export default async function RepDetail({
                         {[h.city, h.state].filter(Boolean).join(", ") || "—"}
                       </td>
                       <td className="px-5 py-2 text-right font-mono">
-                        {formatCompactDollars(h.net_gross_dollars)}
+                        {formatNumber(Math.round(h.net_units))}
                       </td>
                       <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                        {formatNumber(Math.round(h.net_units))}
+                        {formatCompactDollars(h.net_gross_dollars)}
                       </td>
                     </tr>
                   ))}

@@ -241,6 +241,7 @@ export type TopUnmappedDistributor = {
   distributor_account_name: string | null;
   account_state: string | null;
   rows: number;
+  net_units: number;
   net_gross_dollars: number;
   last_seen: string | null;
 };
@@ -262,6 +263,7 @@ export async function loadTopUnmappedDistributors(
          MAX(distributor_account_name) AS distributor_account_name,
          MAX(account_state) AS account_state,
          COUNT(*) AS rows,
+         ROUND(SUM(signed_units), 0) AS net_units,
          ROUND(SUM(signed_gross_dollars), 0) AS net_gross_dollars,
          CONVERT(varchar(10), MAX(transaction_date), 23) AS last_seen
        FROM gold.fact_sale
@@ -270,7 +272,7 @@ export async function loadTopUnmappedDistributors(
          AND distributor_account_id IS NOT NULL
          ${dateFilter}
        GROUP BY distributor_account_id
-       ORDER BY net_gross_dollars DESC`,
+       ORDER BY ABS(SUM(signed_units)) DESC`,
       filtersToParams(filters),
     );
   } catch {
@@ -333,6 +335,8 @@ export async function loadTopHcosBySales(
         tenantId,
         // Over-fetch by a small margin so the unmapped row can land
         // anywhere in the displayed top-N without dropping a real HCO.
+        // Sort by units (the operational metric pharma reps think in);
+        // dollars stay as secondary detail on the rendered table.
         `SELECT TOP ${limit + 1}
            h.hco_key,
            h.name,
@@ -351,7 +355,7 @@ export async function loadTopHcosBySales(
            ${dateFilter}
            ${scopeSql(salesScope)}
          GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
-         ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+         ORDER BY ABS(SUM(f.signed_units)) DESC`,
         params,
       ),
       queryFabric<{
@@ -405,8 +409,10 @@ export async function loadTopHcosBySales(
 
     // Sort naturally by absolute net dollars; the Unmapped row appears
     // wherever its dollar magnitude places it (NOT pinned to the bottom).
+    // Units-first sort (matches SQL ORDER BY signed_units). Unmapped
+    // pseudo-row ranks naturally by units alongside real HCOs.
     combined.sort(
-      (a, b) => Math.abs(b.net_gross_dollars) - Math.abs(a.net_gross_dollars),
+      (a, b) => Math.abs(b.net_units) - Math.abs(a.net_units),
     );
     return combined.slice(0, limit);
   } catch {
@@ -612,7 +618,7 @@ export async function loadHcoTopProducts(
          ${dateFilter}
          ${scopeSql(salesScope)}
        GROUP BY f.product_ndc
-       ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+       ORDER BY ABS(SUM(f.signed_units)) DESC`,
       { ...filtersToParams(filters), ...salesScope.params, hcoKey },
     );
   } catch {
@@ -683,7 +689,7 @@ export async function loadTopRepsBySales(
            ${dateFilter}
            ${scopeSql(salesScope)}
          GROUP BY u.user_key, u.name, u.title
-         ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+         ORDER BY ABS(SUM(f.signed_units)) DESC`,
         params,
       ),
       queryFabric<{
@@ -729,7 +735,7 @@ export async function loadTopRepsBySales(
     }
 
     combined.sort(
-      (a, b) => Math.abs(b.net_gross_dollars) - Math.abs(a.net_gross_dollars),
+      (a, b) => Math.abs(b.net_units) - Math.abs(a.net_units),
     );
     return combined.slice(0, limit);
   } catch {
@@ -881,7 +887,7 @@ export async function loadRepTopHcos(
          AND f.account_type = 'HCO'
          ${dateFilter}
        GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
-       ORDER BY ABS(SUM(f.signed_gross_dollars)) DESC`,
+       ORDER BY ABS(SUM(f.signed_units)) DESC`,
       { ...filtersToParams(filters), userKey },
     );
   } catch {

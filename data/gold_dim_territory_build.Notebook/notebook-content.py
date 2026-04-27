@@ -32,21 +32,28 @@
 #     Stable across rebuilds; used as FK from `gold.fact_sale.territory_key`
 #     and (eventually) `gold.bridge_account_territory.territory_key`.
 #   - **`current_rep_user_key`** — single-rep attribution (Phase A v1
-#     simplification). Resolution priority:
-#       1. silver.user_territory active assignment (THE canonical source
-#          of "who covers this territory"). Deterministic tiebreak if
-#          multiple users assigned: user_type='Sales' first, then
-#          alphabetical by name.
-#       2. NULL when no bridge row exists — fact_sale rows in this
-#          territory land in the "Territory unassigned" bucket on the
-#          /admin/pipelines / dashboard health surfaces.
+#     simplification). Resolved from `silver.user_territory` via:
+#       1. Filter to active assignments where the user is in
+#          ELIGIBLE_REP_TYPES (default ['Sales']). Admin users get
+#          assigned to many territories for visibility; medical / MSL
+#          users don't drive sales attribution.
+#       2. Among eligible candidates per territory, deterministic
+#          tiebreak: alphabetical by name.
+#       3. NULL when no eligible user is assigned — fact_sale rows in
+#          this territory land in the "Territory unassigned" bucket and
+#          surface on /admin/pipelines as a data-quality signal that
+#          someone needs to assign a Sales rep in Veeva.
 #
-#     NOTE: silver.territory.owner_user_id was tried as a fallback in an
-#     earlier iteration but proved actively misleading — Veeva's
+#     NOTE 1: silver.territory.owner_user_id was tried as a fallback in
+#     an earlier iteration but proved actively misleading — Veeva's
 #     `territory__v.owner__v` is typically the ADMIN who created the
 #     territory record (e.g., a Veeva integration user), not the rep
 #     covering the territory's accounts. Using it sent ~all attribution to
 #     the same admin user. Bridge-only is correct.
+#
+#     NOTE 2: ELIGIBLE_REP_TYPES is the seam for tenant variations. If a
+#     tenant uses a value other than 'Sales' for their sales reps (e.g.,
+#     'Sales Rep', 'KAM', 'Account Executive'), add to the list.
 #
 # Per project memory `project_pipeline_architecture.md`: this notebook is a
 # child of the global `incremental_refresh_pipeline` orchestrator. Add to
@@ -55,6 +62,12 @@
 # CELL ********************
 
 GOLD_TABLE = "gold.dim_territory"
+
+# Which silver.user.user_type values are eligible to be picked as the
+# territory's primary sales rep. Sales-only by default; admin/medical
+# get filtered out so they never receive sales attribution. Add tenant-
+# specific values here when needed (e.g. 'KAM', 'Account Executive').
+ELIGIBLE_REP_TYPES = ["Sales"]
 
 spark.sql("CREATE SCHEMA IF NOT EXISTS gold")
 spark.sql(f"""
@@ -92,18 +105,18 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
 # CELL ********************
 
 # Single-pass resolution for current_rep_user_key from the
-# user_territory bridge. silver.territory.owner_user_id is intentionally
-# NOT consulted (see docstring above — it points to admin users, not reps).
+# user_territory bridge, filtered to ELIGIBLE_REP_TYPES (Sales only by
+# default). silver.territory.owner_user_id is intentionally NOT consulted
+# (see docstring — it points to admin users, not reps).
 #
-# Per (tenant, territory), pick the assigned user with this priority:
-#   1. user_type = 'Sales' before non-Sales (an MSL on a territory
-#      shouldn't get sales attribution if a Sales rep is also assigned)
-#   2. alphabetical by name (deterministic tiebreaker)
-#
-# Resolves through silver.user (via veeva_user_id) and projects the
-# owner's display name + a `current_rep_source` tag (always
-# 'territory_bridge' for now — kept as a column for forward compatibility
-# in case we add other resolution paths later).
+# Per (tenant, territory), pick the eligible user with deterministic
+# tiebreak: alphabetical by name. If no eligible user assigned, the
+# territory's current_rep_user_key is NULL — fact_sale rows in this
+# territory get attribution_status='no_rep' and roll up under
+# "Unattributed" on the dashboard. That's the correct signal: an Admin
+# or MSL shouldn't receive sales attribution.
+
+eligible_types_sql = ", ".join(f"'{t}'" for t in ELIGIBLE_REP_TYPES)
 
 build_sql = f"""
 WITH bridge_candidates AS (
@@ -116,15 +129,14 @@ WITH bridge_candidates AS (
     'territory_bridge'                                AS rep_source,
     ROW_NUMBER() OVER (
       PARTITION BY ut.tenant_id, ut.territory_id
-      ORDER BY
-        CASE WHEN u.user_type = 'Sales' THEN 0 ELSE 1 END,
-        u.name ASC NULLS LAST
+      ORDER BY u.name ASC NULLS LAST
     ) AS rn
   FROM silver.user_territory ut
   JOIN silver.user u
     ON u.tenant_id = ut.tenant_id
     AND u.veeva_user_id = ut.user_id
   WHERE COALESCE(ut.status, '') IN ('', 'Active', 'active')
+    AND u.user_type IN ({eligible_types_sql})
 ),
 combined_rep AS (
   SELECT tenant_id, veeva_territory_id, rep_user_key, rep_veeva_user_id,
@@ -206,6 +218,14 @@ spark.sql(f"""
   FROM {GOLD_TABLE}
   ORDER BY name
   LIMIT 10
+""").show(truncate=False)
+
+print("=== Territories with NO eligible Sales rep (data-quality gap) ===")
+spark.sql(f"""
+  SELECT name, team_role, status
+  FROM {GOLD_TABLE}
+  WHERE current_rep_user_key IS NULL
+  ORDER BY name
 """).show(truncate=False)
 
 # METADATA ********************

@@ -149,16 +149,26 @@ export default async function Dashboard({
       : filters.range === "all"
         ? null
         : deltaLabel(kpis.calls_period, kpis.calls_prior);
-  // Sales card: skip the delta when sales data isn't present (cold start
-  // before pipeline runs, or filter window with zero sales). Treat all-time
-  // (no prior) as no-delta too.
+  // Sales card: units headline + dollars sub-line. Reps/managers think
+  // in units (vials, doses, treatment cycles); dollars are the
+  // finance/exec lens. Both rendered.
   const salesDelta =
-    filters.range !== "all" && salesKpis.net_gross_dollars_prior !== 0
+    filters.range !== "all" && salesKpis.net_units_prior !== 0
       ? deltaLabel(
-          salesKpis.net_gross_dollars_period,
-          salesKpis.net_gross_dollars_prior,
+          salesKpis.net_units_period,
+          salesKpis.net_units_prior,
         )
       : null;
+  const salesDollarsLine =
+    salesKpis.net_gross_dollars_period !== 0
+      ? `${formatCompactDollars(salesKpis.net_gross_dollars_period)} net dollars`
+      : null;
+  // Concatenate dollars + delta into delta line — keeps card layout
+  // unchanged (single sub-line) while fitting both pieces of info.
+  const salesSecondary =
+    salesDollarsLine && salesDelta
+      ? `${salesDollarsLine} · ${salesDelta}`
+      : salesDollarsLine ?? salesDelta;
   const cards: { label: string; value: string; delta: string | null }[] = [
     {
       label: `${interactionLabel} (${period})`,
@@ -168,9 +178,9 @@ export default async function Dashboard({
     { label: `${reachLabel} (${period})`, value: reachValue, delta: null },
     { label: `Active reps (${period})`, value: formatNumber(kpis.reps), delta: null },
     {
-      label: `Net sales (${period})`,
-      value: formatCompactDollars(salesKpis.net_gross_dollars_period),
-      delta: salesDelta,
+      label: `Net units (${period})`,
+      value: formatNumber(Math.round(salesKpis.net_units_period)),
+      delta: salesSecondary,
     },
   ];
 
@@ -235,10 +245,10 @@ export default async function Dashboard({
         <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
           <div>
             <h2 className="font-display text-lg">
-              Net sales — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+              Net units — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
             </h2>
             <p className="text-xs text-[var(--color-ink-muted)]">
-              Signed gross dollars (sales − returns), {chartBuckets(filters)}{" "}
+              Signed units (sales − returns), {chartBuckets(filters)}{" "}
               most recent {filters.granularity}
               {chartBuckets(filters) === 1 ? "" : "s"}
             </p>
@@ -256,9 +266,9 @@ export default async function Dashboard({
         <div className="px-2 py-4">
           <TrendChart
             data={salesTrend}
-            valueKey="net_dollars"
-            valueLabel="Net sales"
-            format="dollars"
+            valueKey="net_units"
+            valueLabel="Net units"
+            format="number"
           />
         </div>
       </div>
@@ -406,10 +416,10 @@ export default async function Dashboard({
       {topHcosBySales.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Top HCOs by Net Sales</h2>
+            <h2 className="font-display text-lg">Top HCOs by Units</h2>
             <p className="text-xs text-[var(--color-ink-muted)]">
-              Net dollars in {period}. Unmapped distributor sales appear
-              as their own line so totals always reconcile.
+              Net units in {period}. Unmapped distributor sales appear as
+              their own line so totals always reconcile.
             </p>
           </div>
           <table className="w-full text-sm">
@@ -419,8 +429,8 @@ export default async function Dashboard({
                 <th className="text-left font-normal px-5 py-2">HCO</th>
                 <th className="text-left font-normal px-5 py-2">Type</th>
                 <th className="text-left font-normal px-5 py-2">Location</th>
-                <th className="text-right font-normal px-5 py-2">Net sales</th>
                 <th className="text-right font-normal px-5 py-2">Units</th>
+                <th className="text-right font-normal px-5 py-2">Net dollars</th>
               </tr>
             </thead>
             <tbody>
@@ -466,10 +476,10 @@ export default async function Dashboard({
                         : [h.city, h.state].filter(Boolean).join(", ") || "—"}
                     </td>
                     <td className="px-5 py-2 text-right font-mono">
-                      {formatCompactDollars(h.net_gross_dollars)}
+                      {formatNumber(Math.round(h.net_units))}
                     </td>
                     <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                      {formatNumber(Math.round(h.net_units))}
+                      {formatCompactDollars(h.net_gross_dollars)}
                     </td>
                   </tr>
                 );
@@ -482,9 +492,9 @@ export default async function Dashboard({
       {topRepsBySales.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Top reps by Net Sales</h2>
+            <h2 className="font-display text-lg">Top reps by Units</h2>
             <p className="text-xs text-[var(--color-ink-muted)]">
-              Net dollars in {period}, attributed via primary territory
+              Net units in {period}, attributed via primary territory
               ownership. Unattributed sales (no rep assignment yet) appear
               as their own line so totals reconcile.
             </p>
@@ -496,8 +506,8 @@ export default async function Dashboard({
                 <th className="text-left font-normal px-5 py-2">Rep</th>
                 <th className="text-left font-normal px-5 py-2">Title</th>
                 <th className="text-right font-normal px-5 py-2">HCOs</th>
-                <th className="text-right font-normal px-5 py-2">Net sales</th>
                 <th className="text-right font-normal px-5 py-2">Units</th>
+                <th className="text-right font-normal px-5 py-2">Net dollars</th>
               </tr>
             </thead>
             <tbody>
@@ -541,10 +551,10 @@ export default async function Dashboard({
                         : "—"}
                     </td>
                     <td className="px-5 py-2 text-right font-mono">
-                      {formatCompactDollars(r.net_gross_dollars)}
+                      {formatNumber(Math.round(r.net_units))}
                     </td>
                     <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                      {formatNumber(Math.round(r.net_units))}
+                      {formatCompactDollars(r.net_gross_dollars)}
                     </td>
                   </tr>
                 );
@@ -583,7 +593,8 @@ export default async function Dashboard({
                 </th>
                 <th className="text-left font-normal px-5 py-2">Name</th>
                 <th className="text-left font-normal px-5 py-2">State</th>
-                <th className="text-right font-normal px-5 py-2">Net sales</th>
+                <th className="text-right font-normal px-5 py-2">Units</th>
+                <th className="text-right font-normal px-5 py-2">Net dollars</th>
                 <th className="text-right font-normal px-5 py-2">Rows</th>
                 <th className="text-right font-normal px-5 py-2">Last seen</th>
               </tr>
@@ -607,6 +618,9 @@ export default async function Dashboard({
                     {d.account_state ?? "—"}
                   </td>
                   <td className="px-5 py-2 text-right font-mono">
+                    {formatNumber(Math.round(d.net_units))}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
                     {formatCompactDollars(d.net_gross_dollars)}
                   </td>
                   <td className="px-5 py-2 text-right text-[var(--color-ink-muted)]">
