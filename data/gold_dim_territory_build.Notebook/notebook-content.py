@@ -33,12 +33,20 @@
 #     and (eventually) `gold.bridge_account_territory.territory_key`.
 #   - **`current_rep_user_key`** — single-rep attribution (Phase A v1
 #     simplification). Resolution priority:
-#       1. silver.territory.owner_user_id (Veeva-canonical territory owner)
-#       2. silver.user_territory active assignment, deterministic tiebreak
-#          if multiple (Sales role > others, then alphabetical by name)
-#       3. NULL when no rep is assigned — fact_sale rows in this territory
-#          will land in the "Territory unassigned" bucket on the
+#       1. silver.user_territory active assignment (THE canonical source
+#          of "who covers this territory"). Deterministic tiebreak if
+#          multiple users assigned: user_type='Sales' first, then
+#          alphabetical by name.
+#       2. NULL when no bridge row exists — fact_sale rows in this
+#          territory land in the "Territory unassigned" bucket on the
 #          /admin/pipelines / dashboard health surfaces.
+#
+#     NOTE: silver.territory.owner_user_id was tried as a fallback in an
+#     earlier iteration but proved actively misleading — Veeva's
+#     `territory__v.owner__v` is typically the ADMIN who created the
+#     territory record (e.g., a Veeva integration user), not the rep
+#     covering the territory's accounts. Using it sent ~all attribution to
+#     the same admin user. Bridge-only is correct.
 #
 # Per project memory `project_pipeline_architecture.md`: this notebook is a
 # child of the global `incremental_refresh_pipeline` orchestrator. Add to
@@ -83,40 +91,22 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
 
 # CELL ********************
 
-# Two-pass resolution for current_rep_user_key:
+# Single-pass resolution for current_rep_user_key from the
+# user_territory bridge. silver.territory.owner_user_id is intentionally
+# NOT consulted (see docstring above — it points to admin users, not reps).
 #
-#   Pass 1: prefer silver.territory.owner_user_id (Veeva's "the territory
-#           is owned by this user" field). Cleanest signal when populated.
+# Per (tenant, territory), pick the assigned user with this priority:
+#   1. user_type = 'Sales' before non-Sales (an MSL on a territory
+#      shouldn't get sales attribution if a Sales rep is also assigned)
+#   2. alphabetical by name (deterministic tiebreaker)
 #
-#   Pass 2: fallback to silver.user_territory bridge for territories with
-#           no owner_user_id. Pick deterministically: status='Active',
-#           sales-roled user first (user_type='Sales'), then alphabetical
-#           by name. Catches the case where the territory is operationally
-#           covered but the Veeva owner field was never set.
-#
-# Both passes resolve through silver.user (via user_key surrogate) and
-# project the owner's display name + a `current_rep_source` tag so the
-# admin can see WHICH path resolved each territory.
+# Resolves through silver.user (via veeva_user_id) and projects the
+# owner's display name + a `current_rep_source` tag (always
+# 'territory_bridge' for now — kept as a column for forward compatibility
+# in case we add other resolution paths later).
 
 build_sql = f"""
-WITH owner_pass AS (
-  SELECT
-    t.tenant_id,
-    t.veeva_territory_id,
-    md5(concat_ws('|', t.tenant_id, u.veeva_user_id)) AS rep_user_key,
-    u.veeva_user_id                                   AS rep_veeva_user_id,
-    u.name                                            AS rep_name,
-    'territory_owner'                                 AS rep_source
-  FROM silver.territory t
-  JOIN silver.user u
-    ON u.tenant_id = t.tenant_id
-    AND u.veeva_user_id = t.owner_user_id
-  WHERE t.owner_user_id IS NOT NULL
-),
-bridge_candidates AS (
-  -- All active user_territory rows joined to silver.user, ranked per
-  -- territory by Sales-first then alpha-by-name. Use only when the
-  -- owner_pass didn't already resolve.
+WITH bridge_candidates AS (
   SELECT
     ut.tenant_id,
     ut.territory_id                                   AS veeva_territory_id,
@@ -136,20 +126,10 @@ bridge_candidates AS (
     AND u.veeva_user_id = ut.user_id
   WHERE COALESCE(ut.status, '') IN ('', 'Active', 'active')
 ),
-bridge_pass AS (
+combined_rep AS (
   SELECT tenant_id, veeva_territory_id, rep_user_key, rep_veeva_user_id,
          rep_name, rep_source
   FROM bridge_candidates WHERE rn = 1
-),
-combined_rep AS (
-  SELECT * FROM owner_pass
-  UNION ALL
-  SELECT bp.* FROM bridge_pass bp
-  WHERE NOT EXISTS (
-    SELECT 1 FROM owner_pass op
-    WHERE op.tenant_id = bp.tenant_id
-      AND op.veeva_territory_id = bp.veeva_territory_id
-  )
 )
 SELECT
   md5(concat_ws('|', t.tenant_id, t.veeva_territory_id))                 AS territory_key,
