@@ -38,14 +38,19 @@ Bronze → silver → gold all built and tested against fennec's live Veeva data
 - PBI embed demoted to `/reports/[id]` for deep self-service analysis only
 - Per-feed snapshot/incremental cadence config (`tenant_sftp_feed`) drives silver build batch-selection
 
-**See README.md "Build state" section** for specifics + the immediate-next-milestone (sales metrics on dashboard).
+**See README.md "Build state" section** for specifics + the immediate-next-milestone (Phase B sales-goals surfacing).
 
 ## Architectural patterns we settled on
-- **Postgres = canonical for admin-edited state** (goals, mappings, tenant_user, tenant config). Web app interactive reads go to Postgres.
+- **Postgres = canonical for admin-edited state** (goals, mappings, tenant_user, tenant config, pipeline_run). Web app interactive reads go to Postgres.
 - **Fabric = downstream analytics mirror** (config_sync, goals_sync, etc.). PBI / SQL JOINs / scheduled analytics use these. Sync-lagged; never read for fresh-write displays.
 - **Bronze CSV import + UI per-row** is the pattern for both goals AND mappings. Bulk for day-1 setup, UI for ongoing.
 - **Recommendation-driven defaults** (goals form pre-fills with statistical recommendations + LLM rationale on demand). The 80/20 framing — auto-recommend the 80%, easy tweak for the 20% with conviction.
 - **Signed measures** in fact tables for net-math (`-ABS()` on RETURNS so source convention doesn't matter).
+- **Sales attribution: single-credit, multi-visibility (Option B hybrid).** One territory per HCO is `is_primary` for sales credit (preserves tenant-total reconciliation). All assigned territories show in rep coverage views (matches Fennec's day-to-day rep experience). Primary-pick: `has-rep first` (avoids dead-end attribution when a top-team-role territory has no rep), then `SAM > KAD > ALL > MSL`, then manual > rule, then alpha.
+- **Sales metric default = UNITS, not dollars.** Pharma reps think in units (vials/doses/cycles); dollars are finance/exec context. KPI cards lead with units + dollars sub-line. Tables sort by units.
+- **Sales goals at TERRITORY entity, calls goals at REP entity.** Pharma standard — territories are stable units of market potential; reps come/go but the goal stays. Rep "effective goal" = sum of territories where they're current rep.
+- **Unmapped + unattributed sales must always be visible.** Aggregate SUMs include them; breakdowns surface as "Unmapped" / "Unattributed" pseudo-rows. Never silently drop fact_sale rows. (See `project_unmapped_sales_visibility` memory.)
+- **Per-tenant rules as hardcoded notebook constants** today (TEAM_ROLE_RULES, ELIGIBLE_REP_TYPES). Tracked debt; refactor to per-tenant config table when tenant #2 lands.
 
 ## Orientation for new sessions
 Read these in order:

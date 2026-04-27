@@ -862,6 +862,101 @@ export type RepTopHco = {
   rows: number;
 };
 
+// All HCOs the rep covers via ANY territory bridge (Primary OR
+// Co-coverage). For Option B's multi-visibility model: rep sees their
+// full book of business matching Fennec's coverage view, but sales
+// CREDIT still goes to whoever is primary on each HCO. The is_primary
+// flag tells which HCOs they actually get credit for.
+//
+// Note: not date-filtered. Coverage is a current-state concept, not a
+// time-window concept. The rep is currently assigned to these HCOs;
+// sales attribution within a time window is the separate concern that
+// loadRepTopHcos handles.
+export type RepCoverageHco = {
+  hco_key: string;
+  name: string;
+  hco_type: string | null;
+  city: string | null;
+  state: string | null;
+  // 1 if this rep is the primary credit-getter for this HCO via the
+  // primary territory's current_rep_user_key. 0 if co-coverage only.
+  is_primary_for_rep: number;
+  // Comma-separated list of territory names through which this rep
+  // covers the HCO. Helps the rep see "I cover this via territory X
+  // and Y" when they have multiple paths.
+  territories_covered: string;
+};
+
+export async function loadRepCoverageHcos(
+  tenantId: string,
+  userKey: string,
+  limit = 200,
+): Promise<RepCoverageHco[]> {
+  try {
+    return await queryFabric<RepCoverageHco>(
+      tenantId,
+      `WITH rep_territories AS (
+         -- Territories this rep is actively assigned to in Veeva.
+         -- Resolved via dim_user (user_key → veeva_user_id) →
+         -- silver.user_territory → gold.dim_territory.
+         SELECT t.territory_key, t.name AS territory_name
+         FROM gold.dim_user u
+         JOIN silver.user_territory ut
+           ON ut.tenant_id = u.tenant_id
+           AND ut.user_id = u.veeva_user_id
+           AND COALESCE(ut.status, '') IN ('', 'Active', 'active')
+         JOIN gold.dim_territory t
+           ON t.tenant_id = ut.tenant_id
+           AND t.veeva_territory_id = ut.territory_id
+         WHERE u.tenant_id = @tenantId AND u.user_key = @userKey
+       ),
+       hco_coverage AS (
+         -- Every HCO any rep_territory covers, with the territory names
+         -- collected so the UI can show paths of coverage.
+         SELECT
+           b.account_key,
+           STRING_AGG(rt.territory_name, ', ') WITHIN GROUP (ORDER BY rt.territory_name)
+             AS territories_covered
+         FROM gold.bridge_account_territory b
+         JOIN rep_territories rt
+           ON rt.territory_key = b.territory_key
+         WHERE b.tenant_id = @tenantId
+         GROUP BY b.account_key
+       )
+       SELECT TOP ${limit}
+         h.hco_key,
+         h.name,
+         h.hco_type,
+         h.city,
+         h.state,
+         hc.territories_covered,
+         -- Is this rep the primary credit-getter for this HCO? Resolved
+         -- by checking if the HCO's primary territory's current rep
+         -- equals this user. If so the HCO's sales credit them; if not,
+         -- they cover it but credit goes elsewhere.
+         CASE
+           WHEN EXISTS (
+             SELECT 1 FROM gold.bridge_account_territory bp
+             JOIN gold.dim_territory tp
+               ON tp.tenant_id = bp.tenant_id
+               AND tp.territory_key = bp.territory_key
+             WHERE bp.tenant_id = @tenantId
+               AND bp.account_key = h.hco_key
+               AND CAST(bp.is_primary AS INT) = 1
+               AND tp.current_rep_user_key = @userKey
+           ) THEN 1 ELSE 0
+         END AS is_primary_for_rep
+       FROM gold.dim_hco h
+       JOIN hco_coverage hc ON hc.account_key = h.hco_key
+       WHERE h.tenant_id = @tenantId
+       ORDER BY is_primary_for_rep DESC, h.name`,
+      { userKey },
+    );
+  } catch {
+    return [];
+  }
+}
+
 export async function loadRepTopHcos(
   tenantId: string,
   userKey: string,

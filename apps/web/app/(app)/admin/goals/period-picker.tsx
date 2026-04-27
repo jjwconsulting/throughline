@@ -49,11 +49,9 @@ export default function PeriodPicker({
           className="px-2 py-1.5 rounded border border-[var(--color-border)] bg-white text-sm"
         >
           <option value="calls">Calls</option>
-          <option value="units" disabled>
-            Units (needs sales fact)
-          </option>
+          <option value="units">Units</option>
           <option value="revenue" disabled>
-            Revenue (needs sales fact)
+            Revenue (use units; revenue support pending)
           </option>
         </select>
       </div>

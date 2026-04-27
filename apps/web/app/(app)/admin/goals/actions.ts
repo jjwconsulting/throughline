@@ -47,36 +47,42 @@ export async function saveGoalsAction(
     | "revenue"
     | "reach_pct"
     | "frequency";
+  // Form-driven entity_type — defaults to 'rep' for legacy form posts.
+  // Sales (units) goals come in as 'territory' since pharma sets sales
+  // goals at the territory level, not the rep level.
+  const entityType = String(formData.get("entity_type") ?? "rep") as
+    | "rep"
+    | "territory";
 
   if (!periodStart || !periodEnd) {
     return { error: "Period start/end required", saved: 0 };
   }
 
-  // Pull every value_/recommended_ pair off the form. Walking entries() is
-  // simpler than knowing keys ahead of time.
+  // Pull every value_/recommended_ pair off the form. The suffix is the
+  // entity id (rep user_key for calls goals, territory_key for sales).
   const rows: {
-    userKey: string;
+    entityId: string;
     value: number;
     recommended: number | null;
   }[] = [];
   for (const [key, raw] of formData.entries()) {
     if (!key.startsWith("value_")) continue;
-    const userKey = key.slice("value_".length);
+    const entityId = key.slice("value_".length);
     const valueStr = String(raw).trim();
-    if (valueStr === "") continue; // empty input = skip (don't save anything for this rep)
+    if (valueStr === "") continue; // empty input = skip (no save for this entity)
     const value = Number(valueStr);
     if (!Number.isFinite(value) || value < 0) {
       return {
-        error: `Invalid goal value for one of the reps: "${valueStr}"`,
+        error: `Invalid goal value for one of the entities: "${valueStr}"`,
         saved: 0,
       };
     }
-    const recommendedRaw = formData.get(`recommended_${userKey}`);
+    const recommendedRaw = formData.get(`recommended_${entityId}`);
     const recommended =
       recommendedRaw != null && String(recommendedRaw) !== ""
         ? Number(recommendedRaw)
         : null;
-    rows.push({ userKey, value, recommended });
+    rows.push({ entityId, value, recommended });
   }
 
   if (rows.length === 0) {
@@ -86,8 +92,7 @@ export async function saveGoalsAction(
   const tenantId = resolution.scope.tenantId;
   const createdBy = resolution.scope.role; // simple marker; richer audit later
 
-  // Upsert each row. One round trip per row is fine at <200 rows; if the
-  // page ever serves thousands of reps, batch into a single VALUES insert.
+  // Upsert each row. One round trip per row is fine at <200 rows.
   for (const r of rows) {
     const isUntouched =
       r.recommended != null && Math.round(r.value) === Math.round(r.recommended);
@@ -96,8 +101,8 @@ export async function saveGoalsAction(
       .values({
         tenantId,
         metric,
-        entityType: "rep",
-        entityId: r.userKey,
+        entityType,
+        entityId: r.entityId,
         periodType,
         periodStart,
         periodEnd,
@@ -242,40 +247,87 @@ export async function uploadGoalsAction(
   }
 
   const header = rows[0]!.map((h) => h.toLowerCase().trim());
+  // Detect metric from the column name. We accept goal_calls or
+  // goal_units in the same uploader so admins don't have to flip a
+  // separate metric setting; the file declares its own metric via the
+  // column it uses.
+  const callsIdx = header.indexOf("goal_calls");
+  const unitsIdx = header.indexOf("goal_units");
+  let goalIdx = -1;
+  let metric: "calls" | "units" = "calls";
+  let goalUnit = "count";
+  let entityType: "rep" | "territory" = "rep";
+  if (callsIdx >= 0) {
+    goalIdx = callsIdx;
+    metric = "calls";
+    goalUnit = "count";
+    entityType = "rep";
+  } else if (unitsIdx >= 0) {
+    goalIdx = unitsIdx;
+    metric = "units";
+    goalUnit = "units";
+    entityType = "territory";
+  }
+  // Entity column varies by metric: rep_email for calls (rep entity),
+  // territory_name for units (territory entity).
+  const entityColIdx =
+    entityType === "territory"
+      ? header.indexOf("territory_name")
+      : header.indexOf("rep_email");
   const idx = {
-    email: header.indexOf("rep_email"),
+    entity: entityColIdx,
     period: header.indexOf("period"),
-    goal: header.indexOf("goal_calls"),
+    goal: goalIdx,
   };
-  if (idx.email < 0 || idx.period < 0 || idx.goal < 0) {
+  if (idx.entity < 0 || idx.period < 0 || idx.goal < 0) {
+    const expectedEntity =
+      entityType === "territory" ? "territory_name" : "rep_email";
     return {
       ...empty,
       rowResults: [
         {
           line: 1,
           status: "error",
-          message:
-            "Missing required column(s). Expected: rep_email, period, goal_calls.",
+          message: `Missing required column(s). Expected: ${expectedEntity}, period, goal_${metric}.`,
         },
       ],
     };
   }
 
-  // Build email -> user_key map for this tenant in one query.
-  const userRows = await queryFabric<{ user_key: string; email: string | null }>(
-    tenantId,
-    `SELECT user_key, email
-     FROM gold.dim_user
-     WHERE tenant_id = @tenantId
-       AND status = 'Active'
-       AND user_type IN ('Sales', 'Medical')
-       AND email IS NOT NULL`,
-  );
-  const userKeyByEmail = new Map(
-    userRows
-      .filter((u) => u.email)
-      .map((u) => [u.email!.toLowerCase(), u.user_key]),
-  );
+  // Build the entity lookup map: email → user_key for rep goals,
+  // lowercase-name → territory_key for territory goals.
+  const entityKeyByLookup = new Map<string, string>();
+  if (entityType === "territory") {
+    const territoryRows = await queryFabric<{
+      territory_key: string;
+      name: string;
+    }>(
+      tenantId,
+      `SELECT territory_key, name
+       FROM gold.dim_territory
+       WHERE tenant_id = @tenantId
+         AND COALESCE(status, '') IN ('', 'Active', 'active')`,
+    );
+    for (const t of territoryRows) {
+      entityKeyByLookup.set(t.name.toLowerCase(), t.territory_key);
+    }
+  } else {
+    const userRows = await queryFabric<{
+      user_key: string;
+      email: string | null;
+    }>(
+      tenantId,
+      `SELECT user_key, email
+       FROM gold.dim_user
+       WHERE tenant_id = @tenantId
+         AND status = 'Active'
+         AND user_type IN ('Sales', 'Medical')
+         AND email IS NOT NULL`,
+    );
+    for (const u of userRows) {
+      if (u.email) entityKeyByLookup.set(u.email.toLowerCase(), u.user_key);
+    }
+  }
 
   const results: UploadGoalsState["rowResults"] = [];
   let saved = 0;
@@ -284,18 +336,19 @@ export async function uploadGoalsAction(
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i]!;
     const lineNum = i + 1; // 1-indexed file lines (header is line 1)
-    const email = (row[idx.email] ?? "").trim().toLowerCase();
+    const entityLookup = (row[idx.entity] ?? "").trim().toLowerCase();
     const periodLabel = (row[idx.period] ?? "").trim();
     const goalRaw = (row[idx.goal] ?? "").trim();
 
-    if (!email && !periodLabel && !goalRaw) continue; // blank row, skip silently
+    if (!entityLookup && !periodLabel && !goalRaw) continue; // blank row
 
-    const userKey = userKeyByEmail.get(email);
-    if (!userKey) {
+    const entityKey = entityKeyByLookup.get(entityLookup);
+    if (!entityKey) {
+      const noun = entityType === "territory" ? "territory" : "rep";
       results.push({
         line: lineNum,
         status: "error",
-        message: `No active rep found with email "${email}"`,
+        message: `No active ${noun} found matching "${entityLookup}"`,
       });
       continue;
     }
@@ -315,7 +368,7 @@ export async function uploadGoalsAction(
       results.push({
         line: lineNum,
         status: "error",
-        message: `Invalid goal_calls value "${goalRaw}"`,
+        message: `Invalid goal_${metric} value "${goalRaw}"`,
       });
       continue;
     }
@@ -325,14 +378,14 @@ export async function uploadGoalsAction(
         .insert(schema.goal)
         .values({
           tenantId,
-          metric: "calls",
-          entityType: "rep",
-          entityId: userKey,
+          metric,
+          entityType,
+          entityId: entityKey,
           periodType: inferPeriodType(periodLabel),
           periodStart: range.start,
           periodEnd: range.end,
           goalValue: String(goalValue),
-          goalUnit: "count",
+          goalUnit,
           source: "upload",
           createdBy,
         })
@@ -347,7 +400,7 @@ export async function uploadGoalsAction(
           ],
           set: {
             goalValue: String(goalValue),
-            goalUnit: "count",
+            goalUnit,
             source: "upload",
             updatedAt: new Date(),
           },
@@ -356,7 +409,7 @@ export async function uploadGoalsAction(
       results.push({
         line: lineNum,
         status: "ok",
-        message: `${email} ${periodLabel} = ${goalValue}`,
+        message: `${entityLookup} ${periodLabel} ${metric} = ${goalValue}`,
       });
     } catch (err) {
       results.push({

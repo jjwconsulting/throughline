@@ -6,19 +6,22 @@ import NarrationButton from "./narration-button";
 
 const initial: SaveGoalsState = { error: null, saved: 0 };
 
-export type RepGoalRow = {
-  user_key: string;
+// Generic over goal entity (rep or territory). For rep goals: entity_id =
+// dim_user.user_key, name = rep name, subtitle = title. For territory
+// goals: entity_id = dim_territory.territory_key, name = territory name,
+// subtitle = current rep's name (display context — the actual current
+// rep on a territory; goals follow the territory if rep changes).
+export type EntityGoalRow = {
+  entity_id: string;
   name: string;
-  title: string | null;
+  subtitle: string | null;
   recommended: number;
   method: string;
   rationale: string;
-  // Serialized GoalRecommendation — passed to the on-demand narration action
-  // so it doesn't need to re-query Fabric to explain. Stored as a JSON
-  // string to keep the prop API cheap.
+  // Serialized GoalRecommendation — passed to the on-demand narration
+  // action so it doesn't re-query Fabric to explain.
   recommendation_json: string;
-  // Optional pre-existing saved goal (for the same period). When present,
-  // it pre-fills the input instead of the recommendation.
+  // Optional pre-existing saved goal for this entity + period.
   existing_value: number | null;
   existing_source: string | null;
 };
@@ -29,39 +32,41 @@ export default function GoalsForm({
   periodEnd,
   periodType,
   metric,
+  entityType,
   periodLabel,
+  entityNoun,
 }: {
-  rows: RepGoalRow[];
+  rows: EntityGoalRow[];
   periodStart: string;
   periodEnd: string;
   periodType: "month" | "quarter" | "year" | "custom";
   metric: "calls" | "units" | "revenue" | "reach_pct" | "frequency";
-  // Human label for the period — used by the LLM narration prompt.
+  entityType: "rep" | "territory";
   periodLabel: string;
+  // Display label for the entity column header — "Rep" or "Territory".
+  entityNoun: string;
 }) {
   const [state, formAction, isPending] = useActionState(
     saveGoalsAction,
     initial,
   );
 
-  // Track per-row dirty state so we can show "modified" badges. Initialized
-  // from the recommendation; existing saved goal pre-fills if present.
   const [values, setValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const r of rows) {
       const seed = r.existing_value ?? r.recommended;
-      initial[r.user_key] = String(seed);
+      initial[r.entity_id] = String(seed);
     }
     return initial;
   });
 
-  function set(userKey: string, v: string) {
-    setValues((prev) => ({ ...prev, [userKey]: v }));
+  function set(entityId: string, v: string) {
+    setValues((prev) => ({ ...prev, [entityId]: v }));
   }
 
   function applyAllRecommendations() {
     setValues(
-      Object.fromEntries(rows.map((r) => [r.user_key, String(r.recommended)])),
+      Object.fromEntries(rows.map((r) => [r.entity_id, String(r.recommended)])),
     );
   }
 
@@ -71,31 +76,36 @@ export default function GoalsForm({
       <input type="hidden" name="period_end" value={periodEnd} />
       <input type="hidden" name="period_type" value={periodType} />
       <input type="hidden" name="metric" value={metric} />
+      <input type="hidden" name="entity_type" value={entityType} />
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
+        <div className="text-sm text-[var(--color-ink-muted)]">
           {state.error ? (
-            <p className="text-sm text-[var(--color-negative)]">{state.error}</p>
-          ) : null}
-          {state.saved > 0 ? (
-            <p className="text-sm text-[var(--color-positive)]">
-              Saved {state.saved} goal{state.saved === 1 ? "" : "s"}.
-            </p>
-          ) : null}
+            <span className="text-[var(--color-negative)]">{state.error}</span>
+          ) : state.saved > 0 ? (
+            <span className="text-[var(--color-positive)]">
+              ✓ Saved {state.saved} goal{state.saved === 1 ? "" : "s"}
+            </span>
+          ) : (
+            <>
+              {rows.length} {entityNoun.toLowerCase()}
+              {rows.length === 1 ? "" : "s"}
+            </>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
           <button
             type="button"
             onClick={applyAllRecommendations}
             disabled={isPending}
-            className="px-3 py-1.5 rounded border border-[var(--color-border)] text-xs text-[var(--color-ink)] hover:bg-[var(--color-surface-alt)] disabled:opacity-50"
+            className="px-3 py-1.5 rounded border border-[var(--color-border)] text-sm hover:bg-[var(--color-surface-alt)] disabled:opacity-50"
           >
             Reset all to recommended
           </button>
           <button
             type="submit"
             disabled={isPending}
-            className="px-4 py-1.5 rounded bg-[var(--color-primary)] text-white text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-[var(--color-primary)] text-white text-sm hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
           >
             {isPending ? "Saving…" : `Save ${rows.length} goals`}
           </button>
@@ -106,7 +116,7 @@ export default function GoalsForm({
         <table className="w-full text-sm">
           <thead className="bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)]">
             <tr>
-              <th className="text-left px-4 py-2 font-normal">Rep</th>
+              <th className="text-left px-4 py-2 font-normal">{entityNoun}</th>
               <th className="text-right px-4 py-2 font-normal">Recommended</th>
               <th className="text-left px-4 py-2 font-normal">Goal</th>
               <th className="text-left px-4 py-2 font-normal">Status</th>
@@ -115,7 +125,7 @@ export default function GoalsForm({
           </thead>
           <tbody>
             {rows.map((r) => {
-              const current = values[r.user_key] ?? "";
+              const current = values[r.entity_id] ?? "";
               const currentNum = Number(current);
               const isDirty =
                 Number.isFinite(currentNum) &&
@@ -123,14 +133,14 @@ export default function GoalsForm({
               const hasExisting = r.existing_value != null;
               return (
                 <tr
-                  key={r.user_key}
+                  key={r.entity_id}
                   className="border-t border-[var(--color-border)] align-top"
                 >
                   <td className="px-4 py-3">
                     <div className="font-medium">{r.name}</div>
-                    {r.title ? (
+                    {r.subtitle ? (
                       <div className="text-xs text-[var(--color-ink-muted)]">
-                        {r.title}
+                        {r.subtitle}
                       </div>
                     ) : null}
                   </td>
@@ -142,15 +152,15 @@ export default function GoalsForm({
                       type="number"
                       min="0"
                       step="1"
-                      name={`value_${r.user_key}`}
+                      name={`value_${r.entity_id}`}
                       value={current}
-                      onChange={(e) => set(r.user_key, e.target.value)}
+                      onChange={(e) => set(r.entity_id, e.target.value)}
                       disabled={isPending}
                       className="w-28 px-2 py-1 rounded border border-[var(--color-border)] bg-white font-mono text-sm"
                     />
                     <input
                       type="hidden"
-                      name={`recommended_${r.user_key}`}
+                      name={`recommended_${r.entity_id}`}
                       value={r.recommended}
                     />
                   </td>

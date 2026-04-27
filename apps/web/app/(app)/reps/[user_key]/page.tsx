@@ -11,6 +11,7 @@ import {
   loadRepSalesKpis,
   loadRepSalesTrend,
   loadRepTopHcos,
+  loadRepCoverageHcos,
 } from "@/lib/sales";
 import {
   getCurrentScope,
@@ -136,6 +137,7 @@ export default async function RepDetail({
     repSalesKpis,
     repSalesTrend,
     repTopHcosBySales,
+    repCoverageHcos,
   ] = await Promise.all([
       loadInteractionKpis(tenantId, filters, sqlScope),
       loadTrend(tenantId, filters, sqlScope),
@@ -154,6 +156,9 @@ export default async function RepDetail({
       loadRepSalesKpis(tenantId, user_key, filters),
       loadRepSalesTrend(tenantId, user_key, filters),
       loadRepTopHcos(tenantId, user_key, filters, 10),
+      // Coverage list is current-state, not date-filtered. Cap at 200
+      // for now; if reps cover hundreds we'll add a search/pagination.
+      loadRepCoverageHcos(tenantId, user_key, 200),
     ]);
 
   const hasSalesHistory =
@@ -371,6 +376,78 @@ export default async function RepDetail({
             </div>
           ) : null}
         </>
+      ) : null}
+
+      {repCoverageHcos.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">Coverage HCOs</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              All HCOs assigned to {rep.name}&apos;s territories in Veeva
+              ({repCoverageHcos.length}). The{" "}
+              <span className="text-[var(--color-positive)] font-medium">Primary</span>{" "}
+              badge marks HCOs whose sales credit goes to {rep.name.split(" ")[0]};{" "}
+              <span className="text-[var(--color-ink-muted)] italic">
+                Co-coverage
+              </span>{" "}
+              means {rep.name.split(" ")[0]} is on the territory but another
+              rep gets the sales credit.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-28">Credit</th>
+                <th className="text-left font-normal px-5 py-2">HCO</th>
+                <th className="text-left font-normal px-5 py-2">Type</th>
+                <th className="text-left font-normal px-5 py-2">Location</th>
+                <th className="text-left font-normal px-5 py-2">Via territories</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repCoverageHcos.map((c) => (
+                <tr
+                  key={c.hco_key}
+                  className={
+                    "border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)] " +
+                    (c.is_primary_for_rep === 1
+                      ? ""
+                      : "bg-[var(--color-surface-alt)]/30")
+                  }
+                >
+                  <td className="px-5 py-2">
+                    {c.is_primary_for_rep === 1 ? (
+                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+                        Primary
+                      </span>
+                    ) : (
+                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)] border border-[var(--color-border)]">
+                        Co-coverage
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-2">
+                    <Link
+                      href={`/hcos/${encodeURIComponent(c.hco_key)}`}
+                      className="text-[var(--color-primary)] hover:underline"
+                    >
+                      {c.name}
+                    </Link>
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {c.hco_type ?? "—"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {[c.city, c.state].filter(Boolean).join(", ") || "—"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)] text-xs">
+                    {c.territories_covered ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
 
       <SignalsPanel

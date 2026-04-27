@@ -7,8 +7,10 @@ const initial: UploadGoalsState = { saved: 0, rowResults: [] };
 
 export default function CsvSection({
   periodLabel,
+  metric = "calls",
 }: {
   periodLabel: string; // canonical "2026-Q3" / "2026-05" / "2026" — drives the download URL
+  metric?: "calls" | "units";
 }) {
   const [state, formAction, isPending] = useActionState(
     uploadGoalsAction,
@@ -29,7 +31,7 @@ export default function CsvSection({
 
       <div className="flex flex-wrap items-end gap-3">
         <a
-          href={`/api/admin/goals/template?period=${encodeURIComponent(periodLabel)}`}
+          href={`/api/admin/goals/template?period=${encodeURIComponent(periodLabel)}&metric=${encodeURIComponent(metric)}`}
           className="px-3 py-1.5 rounded border border-[var(--color-border)] text-sm hover:bg-[var(--color-surface-alt)]"
         >
           ↓ Download template ({periodLabel})

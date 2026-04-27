@@ -206,6 +206,273 @@ export async function recommendCallGoalsForReps(
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Units metric, rep entity. Mirrors recommendCallGoalsForReps but reads
+// from gold.fact_sale (rep_user_key + signed_units) instead of fact_call.
+// Same shape returned so the goals form / CSV / lookup code can stay
+// metric-agnostic.
+// ---------------------------------------------------------------------------
+
+export async function recommendUnitsGoalsForReps(
+  tenantId: string,
+  userKeys: string[],
+  periodStart: string,
+  periodEnd: string,
+): Promise<RepRecommendation[]> {
+  if (userKeys.length === 0) return [];
+  const periodDays = daysBetween(periodStart, periodEnd) + 1;
+  const lookback = 4;
+
+  const [historicalRows, peerRows] = await Promise.all([
+    loadHistoricalUnitsForReps(
+      tenantId,
+      userKeys,
+      periodStart,
+      periodDays,
+      lookback,
+    ),
+    loadLastPeriodUnitsForReps(tenantId, userKeys, periodStart, periodDays),
+  ]);
+
+  const histByRep = new Map<string, { period_label: string; value: number }[]>();
+  for (const row of historicalRows) {
+    if (row.units === 0) continue;
+    const list = histByRep.get(row.user_key) ?? [];
+    list.push({ period_label: row.window_start, value: row.units });
+    histByRep.set(row.user_key, list);
+  }
+  for (const list of histByRep.values()) {
+    list.sort((a, b) => a.period_label.localeCompare(b.period_label));
+  }
+
+  const peerValues = peerRows.map((r) => r.peer_units).filter((v) => v > 0);
+  const peerMedian = median(peerValues);
+
+  return userKeys.map((userKey) => ({
+    user_key: userKey,
+    recommendation: synthesize({
+      historical: histByRep.get(userKey) ?? [],
+      peerMedian,
+      unit: "units",
+    }),
+  }));
+}
+
+async function loadHistoricalUnitsForReps(
+  tenantId: string,
+  userKeys: string[],
+  periodStart: string,
+  periodDays: number,
+  lookback: number,
+): Promise<{ user_key: string; window_start: string; units: number }[]> {
+  const userKeyValues = userKeys
+    .map((k) => `('${k.replace(/'/g, "''")}')`)
+    .join(",");
+  const windowValues = Array.from({ length: lookback }, (_, i) => `(${i})`).join(
+    ",",
+  );
+  return queryFabric<{ user_key: string; window_start: string; units: number }>(
+    tenantId,
+    `WITH anchor AS (
+       SELECT DATEADD(DAY, -1, CAST(@periodStart AS date)) AS prev_end
+     ),
+     windows AS (
+       SELECT
+         DATEADD(DAY, -((n + 1) * @periodDays - 1), a.prev_end) AS window_start,
+         DATEADD(DAY, -(n * @periodDays), a.prev_end) AS window_end
+       FROM anchor a
+       CROSS JOIN (VALUES ${windowValues}) AS w(n)
+     ),
+     reps AS (
+       SELECT user_key FROM (VALUES ${userKeyValues}) AS u(user_key)
+     )
+     SELECT
+       r.user_key,
+       CONVERT(varchar(10), w.window_start, 23) AS window_start,
+       COALESCE(ROUND(SUM(f.signed_units), 0), 0) AS units
+     FROM reps r
+     CROSS JOIN windows w
+     LEFT JOIN gold.fact_sale f
+       ON f.tenant_id = @tenantId
+       AND f.rep_user_key = r.user_key
+       AND f.transaction_date >= w.window_start
+       AND f.transaction_date <= w.window_end
+     GROUP BY r.user_key, w.window_start
+     ORDER BY r.user_key, w.window_start`,
+    { periodStart, periodDays },
+  );
+}
+
+async function loadLastPeriodUnitsForReps(
+  tenantId: string,
+  userKeys: string[],
+  periodStart: string,
+  periodDays: number,
+): Promise<{ user_key: string; peer_units: number }[]> {
+  const userKeyValues = userKeys
+    .map((k) => `('${k.replace(/'/g, "''")}')`)
+    .join(",");
+  return queryFabric<{ user_key: string; peer_units: number }>(
+    tenantId,
+    `WITH reps AS (
+       SELECT user_key FROM (VALUES ${userKeyValues}) AS u(user_key)
+     )
+     SELECT
+       r.user_key,
+       COALESCE(ROUND(SUM(f.signed_units), 0), 0) AS peer_units
+     FROM reps r
+     LEFT JOIN gold.fact_sale f
+       ON f.tenant_id = @tenantId
+       AND f.rep_user_key = r.user_key
+       AND f.transaction_date >= DATEADD(DAY, -@periodDays, CAST(@periodStart AS date))
+       AND f.transaction_date < CAST(@periodStart AS date)
+     GROUP BY r.user_key`,
+    { periodStart, periodDays },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Units metric, TERRITORY entity. The pharma-standard shape for sales
+// goals — territories represent stable market potential; reps come and
+// go but the territory's number stays. Mirrors the rep-units recommender
+// but groups by territory_key instead of rep_user_key.
+// ---------------------------------------------------------------------------
+
+export type EntityRecommendation = {
+  entity_id: string;
+  recommendation: GoalRecommendation;
+};
+
+export async function recommendUnitsGoalsForTerritories(
+  tenantId: string,
+  territoryKeys: string[],
+  periodStart: string,
+  periodEnd: string,
+): Promise<EntityRecommendation[]> {
+  if (territoryKeys.length === 0) return [];
+  const periodDays = daysBetween(periodStart, periodEnd) + 1;
+  const lookback = 4;
+
+  const [historicalRows, peerRows] = await Promise.all([
+    loadHistoricalUnitsForTerritories(
+      tenantId,
+      territoryKeys,
+      periodStart,
+      periodDays,
+      lookback,
+    ),
+    loadLastPeriodUnitsForTerritories(
+      tenantId,
+      territoryKeys,
+      periodStart,
+      periodDays,
+    ),
+  ]);
+
+  const histByTerr = new Map<
+    string,
+    { period_label: string; value: number }[]
+  >();
+  for (const row of historicalRows) {
+    if (row.units === 0) continue;
+    const list = histByTerr.get(row.territory_key) ?? [];
+    list.push({ period_label: row.window_start, value: row.units });
+    histByTerr.set(row.territory_key, list);
+  }
+  for (const list of histByTerr.values()) {
+    list.sort((a, b) => a.period_label.localeCompare(b.period_label));
+  }
+
+  const peerValues = peerRows.map((r) => r.peer_units).filter((v) => v > 0);
+  const peerMedian = median(peerValues);
+
+  return territoryKeys.map((territoryKey) => ({
+    entity_id: territoryKey,
+    recommendation: synthesize({
+      historical: histByTerr.get(territoryKey) ?? [],
+      peerMedian,
+      unit: "units",
+    }),
+  }));
+}
+
+async function loadHistoricalUnitsForTerritories(
+  tenantId: string,
+  territoryKeys: string[],
+  periodStart: string,
+  periodDays: number,
+  lookback: number,
+): Promise<{ territory_key: string; window_start: string; units: number }[]> {
+  const territoryValues = territoryKeys
+    .map((k) => `('${k.replace(/'/g, "''")}')`)
+    .join(",");
+  const windowValues = Array.from({ length: lookback }, (_, i) => `(${i})`).join(
+    ",",
+  );
+  return queryFabric<{
+    territory_key: string;
+    window_start: string;
+    units: number;
+  }>(
+    tenantId,
+    `WITH anchor AS (
+       SELECT DATEADD(DAY, -1, CAST(@periodStart AS date)) AS prev_end
+     ),
+     windows AS (
+       SELECT
+         DATEADD(DAY, -((n + 1) * @periodDays - 1), a.prev_end) AS window_start,
+         DATEADD(DAY, -(n * @periodDays), a.prev_end) AS window_end
+       FROM anchor a
+       CROSS JOIN (VALUES ${windowValues}) AS w(n)
+     ),
+     territories AS (
+       SELECT territory_key FROM (VALUES ${territoryValues}) AS t(territory_key)
+     )
+     SELECT
+       t.territory_key,
+       CONVERT(varchar(10), w.window_start, 23) AS window_start,
+       COALESCE(ROUND(SUM(f.signed_units), 0), 0) AS units
+     FROM territories t
+     CROSS JOIN windows w
+     LEFT JOIN gold.fact_sale f
+       ON f.tenant_id = @tenantId
+       AND f.territory_key = t.territory_key
+       AND f.transaction_date >= w.window_start
+       AND f.transaction_date <= w.window_end
+     GROUP BY t.territory_key, w.window_start
+     ORDER BY t.territory_key, w.window_start`,
+    { periodStart, periodDays },
+  );
+}
+
+async function loadLastPeriodUnitsForTerritories(
+  tenantId: string,
+  territoryKeys: string[],
+  periodStart: string,
+  periodDays: number,
+): Promise<{ territory_key: string; peer_units: number }[]> {
+  const territoryValues = territoryKeys
+    .map((k) => `('${k.replace(/'/g, "''")}')`)
+    .join(",");
+  return queryFabric<{ territory_key: string; peer_units: number }>(
+    tenantId,
+    `WITH territories AS (
+       SELECT territory_key FROM (VALUES ${territoryValues}) AS t(territory_key)
+     )
+     SELECT
+       t.territory_key,
+       COALESCE(ROUND(SUM(f.signed_units), 0), 0) AS peer_units
+     FROM territories t
+     LEFT JOIN gold.fact_sale f
+       ON f.tenant_id = @tenantId
+       AND f.territory_key = t.territory_key
+       AND f.transaction_date >= DATEADD(DAY, -@periodDays, CAST(@periodStart AS date))
+       AND f.transaction_date < CAST(@periodStart AS date)
+     GROUP BY t.territory_key`,
+    { periodStart, periodDays },
+  );
+}
+
 async function loadHistoricalCallsForReps(
   tenantId: string,
   userKeys: string[],

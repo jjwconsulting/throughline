@@ -4,12 +4,15 @@
 //
 // Query params:
 //   period      — "YYYY-Q[1-4]" | "YYYY-MM" | "YYYY"  (default: next quarter)
-//   metric      — "calls"  (others wait on fact_sales)
+//   metric      — "calls" | "units" (revenue pending)
 
 import { NextRequest, NextResponse } from "next/server";
 import { queryFabric } from "@/lib/fabric";
 import { getCurrentScope } from "@/lib/scope";
-import { recommendCallGoalsForReps } from "@/lib/goal-recommendations";
+import {
+  recommendCallGoalsForReps,
+  recommendUnitsGoalsForTerritories,
+} from "@/lib/goal-recommendations";
 import {
   nextQuarterRange,
   parsePeriodLabel,
@@ -30,56 +33,90 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const periodParam = searchParams.get("period");
   const range = parsePeriodLabel(periodParam) ?? nextQuarterRange(new Date());
   const metric = searchParams.get("metric") ?? "calls";
-  if (metric !== "calls") {
+  if (metric !== "calls" && metric !== "units") {
     return NextResponse.json(
-      { error: "Only the 'calls' metric is supported in v1." },
+      { error: "Supported metrics: 'calls', 'units'." },
       { status: 400 },
     );
   }
 
-  const reps = await queryFabric<{
-    user_key: string;
-    name: string;
-    email: string | null;
-  }>(
-    tenantId,
-    `SELECT user_key, name, email
-     FROM gold.dim_user
-     WHERE tenant_id = @tenantId
-       AND status = 'Active'
-       AND user_type IN ('Sales', 'Medical')
-     ORDER BY name`,
-  );
-
-  const recommendations = await recommendCallGoalsForReps(
-    tenantId,
-    reps.map((r) => r.user_key),
-    range.start,
-    range.end,
-  );
-  const recByKey = new Map(
-    recommendations.map((r) => [r.user_key, r.recommendation.value]),
-  );
-
   const periodLabel = formatPeriodForCsv(range.start, range.end);
-  const lines: string[] = [
-    "rep_email,period,goal_calls,recommended_calls",
-  ];
-  for (const rep of reps) {
-    const recommended = recByKey.get(rep.user_key) ?? 0;
-    // Skip reps without an email — admin can't address them in the upload
-    // (we look up user_key by email). Emit a comment line so they know.
-    if (!rep.email) {
-      lines.push(
-        `# SKIPPED — no email in Veeva: ${escapeCsv(rep.name)} (user_key=${rep.user_key})`,
-      );
-      continue;
-    }
-    // recommended_calls is informational only (the upload parser ignores it).
-    // It's there so the admin can compare what we suggested vs what they set.
-    lines.push(
-      `${escapeCsv(rep.email)},${periodLabel},${recommended},${recommended}`,
+  const lines: string[] = [];
+
+  if (metric === "units") {
+    // Sales goals = territory entity. CSV uses `territory_name` since
+    // it's human-readable (admins recognize "C101" in Excel; territory
+    // UUIDs are noise). The upload parser does name-based lookup back
+    // to territory_key.
+    const territories = await queryFabric<{
+      territory_key: string;
+      name: string;
+      current_rep_name: string | null;
+    }>(
+      tenantId,
+      `SELECT territory_key, name, current_rep_name
+       FROM gold.dim_territory
+       WHERE tenant_id = @tenantId
+         AND COALESCE(status, '') IN ('', 'Active', 'active')
+       ORDER BY name`,
     );
+
+    const recs = await recommendUnitsGoalsForTerritories(
+      tenantId,
+      territories.map((t) => t.territory_key),
+      range.start,
+      range.end,
+    );
+    const recByKey = new Map(
+      recs.map((r) => [r.entity_id, r.recommendation.value]),
+    );
+
+    lines.push("territory_name,period,goal_units,recommended_units,current_rep");
+    for (const t of territories) {
+      const recommended = recByKey.get(t.territory_key) ?? 0;
+      lines.push(
+        `${escapeCsv(t.name)},${periodLabel},${recommended},${recommended},${escapeCsv(t.current_rep_name ?? "")}`,
+      );
+    }
+  } else {
+    // Calls goals = rep entity (existing behavior).
+    const reps = await queryFabric<{
+      user_key: string;
+      name: string;
+      email: string | null;
+    }>(
+      tenantId,
+      `SELECT user_key, name, email
+       FROM gold.dim_user
+       WHERE tenant_id = @tenantId
+         AND status = 'Active'
+         AND user_type IN ('Sales', 'Medical')
+       ORDER BY name`,
+    );
+
+    const recs = await recommendCallGoalsForReps(
+      tenantId,
+      reps.map((r) => r.user_key),
+      range.start,
+      range.end,
+    );
+    const recByKey = new Map(
+      recs.map((r) => [r.user_key, r.recommendation.value]),
+    );
+
+    lines.push("rep_email,period,goal_calls,recommended_calls");
+    for (const rep of reps) {
+      const recommended = recByKey.get(rep.user_key) ?? 0;
+      if (!rep.email) {
+        lines.push(
+          `# SKIPPED — no email in Veeva: ${escapeCsv(rep.name)} (user_key=${rep.user_key})`,
+        );
+        continue;
+      }
+      lines.push(
+        `${escapeCsv(rep.email)},${periodLabel},${recommended},${recommended}`,
+      );
+    }
   }
 
   const filename = `throughline-goals-${periodLabel}-${metric}.csv`;
