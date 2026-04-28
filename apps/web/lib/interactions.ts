@@ -58,8 +58,9 @@ export async function loadInteractionKpis(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<InteractionKpis> {
-  const { channelFilter, accountFilter } = filterClauses(filters);
-  const extras = `${channelFilter} ${accountFilter} ${scopeSql(scope)}`;
+  const { channelFilter, accountFilter, territoryFilter } =
+    filterClauses(filters);
+  const extras = `${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}`;
   const params = mergeParams(filters, scope);
 
   if (filters.range === "all") {
@@ -96,7 +97,7 @@ export async function loadInteractionKpis(
     `WITH all_scope AS (
        SELECT MAX(call_date) AS last_call
        FROM gold.fact_call f
-       WHERE f.tenant_id = @tenantId ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+       WHERE f.tenant_id = @tenantId ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      ),
      window_scope AS (
        SELECT f.call_date, f.hcp_key, f.hco_key, f.owner_user_key
@@ -104,7 +105,7 @@ export async function loadInteractionKpis(
        WHERE f.tenant_id = @tenantId
          AND f.call_date >= @kpiPriorStart
          AND f.call_date <= @kpiPeriodEnd
-         ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+         ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      )
      -- COALESCE on SUMs because they return NULL (not 0) when window_scope
      -- is empty for this RLS scope (e.g., a rep visiting an HCO they don't
@@ -158,7 +159,8 @@ export async function loadTrend(
   scope: Scope = NO_SCOPE,
 ): Promise<TrendPoint[]> {
   const buckets = chartBuckets(filters);
-  const { channelFilter, accountFilter } = filterClauses(filters);
+  const { channelFilter, accountFilter, territoryFilter } =
+    filterClauses(filters);
   const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
   const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
 
@@ -180,7 +182,7 @@ export async function loadTrend(
        ON f.tenant_id = @tenantId
        AND f.call_date >= b.bucket_start
        AND f.call_date < ${addOneSql}
-       ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+       ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      GROUP BY b.bucket_start
      ORDER BY b.bucket_start ASC`,
     mergeParams(filters, scope),
@@ -247,7 +249,8 @@ export async function loadTopReps(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopRep[]> {
-  const { dateFilter, channelFilter, accountFilter } = filterClauses(filters);
+  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+    filterClauses(filters);
   return queryFabric<TopRep>(
     tenantId,
     `SELECT TOP 10 u.user_key, u.name, COUNT(*) AS calls
@@ -255,7 +258,7 @@ export async function loadTopReps(
      JOIN gold.dim_user u ON u.user_key = f.owner_user_key AND u.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
        AND u.user_type IN ('Sales', 'Medical')
-       ${dateFilter} ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      GROUP BY u.user_key, u.name
      ORDER BY calls DESC`,
     mergeParams(filters, scope),
@@ -278,14 +281,15 @@ export async function loadTopHcps(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopHcp[]> {
-  const { dateFilter, channelFilter, accountFilter } = filterClauses(filters);
+  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+    filterClauses(filters);
   return queryFabric<TopHcp>(
     tenantId,
     `SELECT TOP 10 h.hcp_key, h.name, h.specialty_primary AS specialty, COUNT(*) AS calls
      FROM gold.fact_call f
      JOIN gold.dim_hcp h ON h.hcp_key = f.hcp_key AND h.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      GROUP BY h.hcp_key, h.name, h.specialty_primary
      ORDER BY calls DESC`,
     mergeParams(filters, scope),
@@ -310,18 +314,122 @@ export async function loadTopHcos(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopHco[]> {
-  const { dateFilter, channelFilter, accountFilter } = filterClauses(filters);
+  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+    filterClauses(filters);
   return queryFabric<TopHco>(
     tenantId,
     `SELECT TOP 10 h.hco_key, h.name, h.hco_type, h.city, h.state, COUNT(*) AS calls
      FROM gold.fact_call f
      JOIN gold.dim_hco h ON h.hco_key = f.hco_key AND h.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${accountFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
      GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
      ORDER BY calls DESC`,
     mergeParams(filters, scope),
   );
+}
+
+// ---------------------------------------------------------------------------
+// HCP tier coverage: per-tier rollup of "how much of the rep universe is
+// being touched in the period." Universe is HCPs assigned to any
+// territory the user can see (passed in as accessibleTerritoryKeys to
+// avoid a second roundtrip — the caller already loaded them for the
+// FilterBar). Contacted = distinct HCPs called in the period under the
+// user's RLS scope. Tiers come from dim_hcp.tier; missing/blank tiers
+// bucket as "Unknown" so they're visible (and actionable) rather than
+// silently dropped.
+//
+// Returns empty when the range is "all" (no period to compute "contacted
+// in window") or when the user has zero accessible territories.
+// ---------------------------------------------------------------------------
+
+export type TierCoverageRow = {
+  tier: string;
+  total_hcps: number;
+  contacted: number;
+  no_activity: number;
+  pct_contacted: number;
+};
+
+export async function loadTierCoverage(
+  tenantId: string,
+  filters: DashboardFilters,
+  accessibleTerritoryKeys: string[],
+  scope: Scope = NO_SCOPE,
+): Promise<TierCoverageRow[]> {
+  if (accessibleTerritoryKeys.length === 0) return [];
+  const dates = rangeDates(filters.range);
+  if (!dates) return [];
+
+  try {
+    // Inline-IN on the territory keys (md5 hex; safe). Single-territory
+    // filter takes precedence — narrows the universe to that one slice.
+    const sanitizedKeys = accessibleTerritoryKeys
+      .map((k) => `'${k.replace(/'/g, "''")}'`)
+      .join(",");
+    const territoryClause = filters.territory
+      ? `AND b.territory_key = @filterTerritory`
+      : `AND b.territory_key IN (${sanitizedKeys})`;
+
+    const params = mergeParams(filters, scope);
+
+    const rows = await queryFabric<TierCoverageRow>(
+      tenantId,
+      `WITH scoped_hcps AS (
+         SELECT DISTINCT
+           h.hcp_key,
+           COALESCE(NULLIF(LTRIM(RTRIM(h.tier)), ''), 'Unknown') AS tier
+         FROM gold.dim_hcp h
+         JOIN gold.bridge_account_territory b
+           ON b.tenant_id = h.tenant_id
+           AND b.account_key = h.hcp_key
+         WHERE h.tenant_id = @tenantId
+           AND h.status = 'Active'
+           ${territoryClause}
+       ),
+       contacted AS (
+         SELECT DISTINCT f.hcp_key
+         FROM gold.fact_call f
+         WHERE f.tenant_id = @tenantId
+           AND f.call_date >= @filterStart
+           AND f.call_date <= @filterEnd
+           AND f.hcp_key IS NOT NULL
+           ${scopeSql(scope)}
+       )
+       SELECT
+         s.tier,
+         COUNT(DISTINCT s.hcp_key) AS total_hcps,
+         COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN s.hcp_key END) AS contacted,
+         COUNT(DISTINCT s.hcp_key)
+           - COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN s.hcp_key END) AS no_activity,
+         CASE WHEN COUNT(DISTINCT s.hcp_key) > 0
+           THEN CAST(ROUND(100.0 * COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN s.hcp_key END)
+                           / COUNT(DISTINCT s.hcp_key), 0) AS INT)
+           ELSE 0
+         END AS pct_contacted
+       FROM scoped_hcps s
+       LEFT JOIN contacted c ON c.hcp_key = s.hcp_key
+       GROUP BY s.tier`,
+      params,
+    );
+
+    // Sort numeric tiers ascending (1, 2, 3 …), then named tiers alpha,
+    // then "Unknown" last so it doesn't crowd the actionable rows.
+    return rows.sort((a, b) => {
+      if (a.tier === "Unknown") return 1;
+      if (b.tier === "Unknown") return -1;
+      const an = Number(a.tier);
+      const bn = Number(b.tier);
+      const aIsNum = !Number.isNaN(an);
+      const bIsNum = !Number.isNaN(bn);
+      if (aIsNum && bIsNum) return an - bn;
+      if (aIsNum) return -1;
+      if (bIsNum) return 1;
+      return a.tier.localeCompare(b.tier);
+    });
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------

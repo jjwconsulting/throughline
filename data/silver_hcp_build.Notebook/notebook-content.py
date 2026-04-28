@@ -65,6 +65,12 @@ MAPPED_COLUMNS = [
     "is_prescriber", "is_kol", "is_speaker", "is_investigator",
     "status", "segmentation",
     "tier", "account_type", "source_id",
+    # Primary HCO affiliation — Veeva's account.primary_parent__v points
+    # an HCP at their parent HCO account (the "where do they practice"
+    # link). Carried as raw account_id at silver; gold dim_hcp resolves
+    # to a surrogate hco_key + name so explore matrices can group HCPs
+    # by affiliation.
+    "primary_parent_account_id",
 ]
 
 # Silver columns that should be translated through silver.picklist.
@@ -135,6 +141,7 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
   tier                 STRING,
   account_type         STRING,
   source_id            STRING,
+  primary_parent_account_id STRING,
   silver_built_at      TIMESTAMP NOT NULL
 ) USING DELTA
 """)

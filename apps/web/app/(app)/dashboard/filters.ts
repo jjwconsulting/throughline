@@ -56,6 +56,12 @@ export type DashboardFilters = {
   channel: CallChannel;
   account: AccountType;
   granularity: Granularity;
+  // Optional single-territory filter. Null = "all territories visible to
+  // this user" (RLS already scopes the visible set; this further narrows).
+  // V1 applies to SALES loaders only (fact_sale.territory_key is native);
+  // call loaders are not territory-aware until fact_call gains an HCO/
+  // territory dimension. See project_gold_fact_call_followups.
+  territory: string | null;
 };
 
 export const DEFAULT_FILTERS: DashboardFilters = {
@@ -63,6 +69,7 @@ export const DEFAULT_FILTERS: DashboardFilters = {
   channel: "all",
   account: "all",
   granularity: "week",
+  territory: null,
 };
 
 export function parseFilters(
@@ -76,7 +83,19 @@ export function parseFilters(
     GRANULARITIES,
     DEFAULT_FILTERS.granularity,
   );
-  return { range, channel, account, granularity };
+  const territoryRaw = Array.isArray(raw.territory)
+    ? raw.territory[0]
+    : raw.territory;
+  const territory =
+    territoryRaw && territoryRaw.length > 0 ? territoryRaw : null;
+  return { range, channel, account, granularity, territory };
+}
+
+// SQL fragment + params hook for territory-aware sales loaders. Returns
+// empty string when no territory is selected so existing queries don't
+// pay any cost on the unfiltered path.
+export function territorySalesFilter(filters: DashboardFilters): string {
+  return filters.territory ? `AND f.territory_key = @filterTerritory` : "";
 }
 
 export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
@@ -108,13 +127,15 @@ export const TIME_RANGE_LABELS: Record<TimeRange, string> = {
 };
 
 // Returns SQL fragments + params to apply the current filter against gold.fact_call.
-// Caller appends `${dateFilter} ${channelFilter} ${accountFilter}` to its WHERE clause.
-// dateFilter uses bound `@filterStart` / `@filterEnd` params — added by
-// filtersToParams() automatically.
+// Caller appends `${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter}`
+// to its WHERE clause. dateFilter uses bound `@filterStart` / `@filterEnd`
+// params — added by filtersToParams() automatically. territoryFilter binds
+// `@filterTerritory` (also from filtersToParams).
 export function filterClauses(filters: DashboardFilters): {
   dateFilter: string;
   channelFilter: string;
   accountFilter: string;
+  territoryFilter: string;
 } {
   const dates = rangeDates(filters.range);
   const dateFilter = dates
@@ -130,7 +151,25 @@ export function filterClauses(filters: DashboardFilters): {
       : filters.account === "hco"
         ? "AND f.hco_key IS NOT NULL"
         : "";
-  return { dateFilter, channelFilter, accountFilter };
+  // Calls inherit their territory through the HCP they touched. Veeva's
+  // account_territory__v junction is polymorphic (HCP or HCO accounts)
+  // and lands in silver.account_territory → gold.bridge_account_territory
+  // — same surrogate key formula as dim_hcp.hcp_key, so we can filter
+  // f.hcp_key directly against the bridge. This is current-state
+  // attribution: an HCP currently assigned to the selected territory has
+  // their entire call history shown. Owner-temporal SCD2 (Fennec's
+  // BridgeCallTerritory pattern, pinning each call to the territory the
+  // rep was in AT CALL TIME) is the eventual end-state — see
+  // project_owner_temporal_scd2_followup memory.
+  const territoryFilter = filters.territory
+    ? `AND f.hcp_key IN (
+        SELECT b.account_key
+        FROM gold.bridge_account_territory b
+        WHERE b.tenant_id = @tenantId
+          AND b.territory_key = @filterTerritory
+      )`
+    : "";
+  return { dateFilter, channelFilter, accountFilter, territoryFilter };
 }
 
 // Number of days the current range covers, end-inclusive. Null for "all".
@@ -223,6 +262,9 @@ export function filtersToParams(
   if (dates) {
     params.filterStart = dates.start;
     params.filterEnd = dates.end;
+  }
+  if (filters.territory) {
+    params.filterTerritory = filters.territory;
   }
   return params;
 }

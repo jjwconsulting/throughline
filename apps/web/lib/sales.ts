@@ -18,10 +18,12 @@ import {
   rangeDays,
   chartBuckets,
   filtersToParams,
+  territorySalesFilter,
   type DashboardFilters,
   type Granularity,
 } from "@/app/(app)/dashboard/filters";
 import { type Scope, NO_SCOPE } from "@/lib/interactions";
+import type { UserScope } from "@/lib/scope";
 
 // Sales-side RLS clauses use `f.rep_user_key` (different column than
 // fact_call's `f.owner_user_key`). interactions.ts emits clauses keyed
@@ -92,7 +94,8 @@ export async function loadSalesKpis(
            COUNT(DISTINCT CASE WHEN account_key IS NULL THEN distributor_account_id END) AS accounts_unmapped
          FROM gold.fact_sale f
          WHERE f.tenant_id = @tenantId
-           ${scopeSql(salesScope)}`,
+           ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}`,
         params,
       );
       return rows[0] ?? emptySalesKpis();
@@ -117,7 +120,8 @@ export async function loadSalesKpis(
        WHERE f.tenant_id = @tenantId
          AND f.transaction_date >= @kpiPriorStart
          AND f.transaction_date <= @kpiPeriodEnd
-         ${scopeSql(salesScope)}`,
+         ${scopeSql(salesScope)}
+         ${territorySalesFilter(filters)}`,
       {
         ...params,
         kpiPeriodStart: periodStart,
@@ -216,6 +220,7 @@ export async function loadSalesTrend(
          AND f.transaction_date >= b.bucket_start
          AND f.transaction_date < ${addOneSql}
          ${scopeSql(salesScope)}
+         ${territorySalesFilter(filters)}
        GROUP BY b.bucket_start
        ORDER BY b.bucket_start ASC`,
       { ...filtersToParams(filters), ...salesScope.params },
@@ -252,6 +257,11 @@ export async function loadTopUnmappedDistributors(
   limit = 10,
 ): Promise<TopUnmappedDistributor[]> {
   try {
+    // Unmapped distributors don't have a territory by definition (no
+    // account_key, no bridge → no territory_key). When the user has
+    // narrowed to a specific territory, suppress this surface entirely
+    // rather than silently showing tenant-wide unmapped totals.
+    if (filters.territory) return [];
     const dates = rangeDates(filters.range);
     const dateFilter = dates
       ? `AND transaction_date >= @filterStart AND transaction_date <= @filterEnd`
@@ -354,6 +364,7 @@ export async function loadTopHcosBySales(
            AND f.account_type = 'HCO'
            ${dateFilter}
            ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}
          GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
          ORDER BY ABS(SUM(f.signed_units)) DESC`,
         params,
@@ -365,6 +376,10 @@ export async function loadTopHcosBySales(
         distributor_count: number;
       }>(
         tenantId,
+        // Unmapped pseudo-row: when a territory filter is set, these
+        // rows have NULL territory_key and the AND filter naturally
+        // returns 0 — pseudo-row drops out, which is the right
+        // behavior (unmapped sales aren't "in" any territory).
         `SELECT
            ROUND(SUM(f.signed_gross_dollars), 0) AS net_gross_dollars,
            ROUND(SUM(f.signed_units), 0) AS net_units,
@@ -375,7 +390,8 @@ export async function loadTopHcosBySales(
            AND f.account_key IS NULL
            AND f.distributor_account_id IS NOT NULL
            ${dateFilter}
-           ${scopeSql(salesScope)}`,
+           ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}`,
         params,
       ),
     ]);
@@ -415,6 +431,381 @@ export async function loadTopHcosBySales(
       (a, b) => Math.abs(b.net_units) - Math.abs(a.net_units),
     );
     return combined.slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Account motion: HCOs whose net units this period materially changed
+// vs the equivalent prior period. Two directions share one loader:
+//   "rising"    — period units > prior units (positive delta), top-N
+//   "declining" — period units < prior units (negative delta), top-N
+//
+// Both filter to accounts with sales in BOTH periods. Stop-outs
+// (prior > 0, period = 0) belong to the watch list; net-new accounts
+// (prior = 0, period > 0) belong to the new-accounts trend. Keeping
+// the surfaces non-overlapping makes them mutually exclusive on the
+// dashboard so the same HCO doesn't show up in three places.
+//
+// "All" range returns empty — period-over-period requires a window.
+// Unmapped distributors aren't in this view (no HCO identity to rank
+// by); the unmapped pseudo-row on Top HCOs by Units already surfaces
+// the magnitude.
+// ---------------------------------------------------------------------------
+
+export type AccountMotionRow = {
+  hco_key: string;
+  name: string;
+  hco_type: string | null;
+  city: string | null;
+  state: string | null;
+  units_period: number;
+  units_prior: number;
+  units_delta: number;
+  // Null when prior was zero or negative (no meaningful pct base). UI
+  // shows a dash; the absolute delta is the operational signal anyway.
+  units_delta_pct: number | null;
+  dollars_period: number;
+  dollars_prior: number;
+};
+
+export async function loadAccountMotion(
+  tenantId: string,
+  filters: DashboardFilters,
+  direction: "rising" | "declining",
+  limit = 10,
+  scope: Scope = NO_SCOPE,
+): Promise<AccountMotionRow[]> {
+  try {
+    const dates = rangeDates(filters.range);
+    if (!dates) return []; // "all" range — no period-over-period possible.
+    const days = rangeDays(filters.range)!;
+    const periodStart = dates.start;
+    const periodEnd = dates.end;
+    const priorStart = isoDateMinusDays(periodStart, days);
+    const priorEnd = isoDateMinusDays(periodStart, 1);
+
+    const salesScope = rewriteScopeForSales(scope);
+    const params = {
+      ...filtersToParams(filters),
+      ...salesScope.params,
+      motionPeriodStart: periodStart,
+      motionPeriodEnd: periodEnd,
+      motionPriorStart: priorStart,
+      motionPriorEnd: priorEnd,
+    };
+
+    // Order by signed delta. Rising = largest positive first (DESC);
+    // declining = largest negative first (ASC). The HAVING clause
+    // excludes rows that don't fit the direction so the top-N isn't
+    // diluted by flat-or-opposite-direction movers.
+    const orderDir = direction === "rising" ? "DESC" : "ASC";
+    const havingClause =
+      direction === "rising"
+        ? "HAVING SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END) > 0 AND SUM(CASE WHEN f.transaction_date >= @motionPriorStart AND f.transaction_date <= @motionPriorEnd THEN f.signed_units ELSE 0 END) > 0 AND SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END) > SUM(CASE WHEN f.transaction_date >= @motionPriorStart AND f.transaction_date <= @motionPriorEnd THEN f.signed_units ELSE 0 END)"
+        : "HAVING SUM(CASE WHEN f.transaction_date >= @motionPriorStart AND f.transaction_date <= @motionPriorEnd THEN f.signed_units ELSE 0 END) > 0 AND SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END) > 0 AND SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END) < SUM(CASE WHEN f.transaction_date >= @motionPriorStart AND f.transaction_date <= @motionPriorEnd THEN f.signed_units ELSE 0 END)";
+
+    const rows = await queryFabric<{
+      hco_key: string;
+      name: string;
+      hco_type: string | null;
+      city: string | null;
+      state: string | null;
+      units_period: number;
+      units_prior: number;
+      dollars_period: number;
+      dollars_prior: number;
+    }>(
+      tenantId,
+      `SELECT TOP ${limit}
+         h.hco_key,
+         h.name,
+         h.hco_type,
+         h.city,
+         h.state,
+         ROUND(SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END), 0) AS units_period,
+         ROUND(SUM(CASE WHEN f.transaction_date >= @motionPriorStart  AND f.transaction_date <= @motionPriorEnd  THEN f.signed_units ELSE 0 END), 0) AS units_prior,
+         ROUND(SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_gross_dollars ELSE 0 END), 0) AS dollars_period,
+         ROUND(SUM(CASE WHEN f.transaction_date >= @motionPriorStart  AND f.transaction_date <= @motionPriorEnd  THEN f.signed_gross_dollars ELSE 0 END), 0) AS dollars_prior
+       FROM gold.fact_sale f
+       JOIN gold.dim_hco h
+         ON h.hco_key = f.account_key
+         AND h.tenant_id = @tenantId
+       WHERE f.tenant_id = @tenantId
+         AND f.account_type = 'HCO'
+         AND f.transaction_date >= @motionPriorStart
+         AND f.transaction_date <= @motionPeriodEnd
+         ${scopeSql(salesScope)}
+         ${territorySalesFilter(filters)}
+       GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
+       ${havingClause}
+       ORDER BY (
+         SUM(CASE WHEN f.transaction_date >= @motionPeriodStart AND f.transaction_date <= @motionPeriodEnd THEN f.signed_units ELSE 0 END)
+         - SUM(CASE WHEN f.transaction_date >= @motionPriorStart AND f.transaction_date <= @motionPriorEnd THEN f.signed_units ELSE 0 END)
+       ) ${orderDir}`,
+      params,
+    );
+
+    return rows.map((r) => {
+      const period = Number(r.units_period) || 0;
+      const prior = Number(r.units_prior) || 0;
+      const delta = period - prior;
+      const pct = prior > 0 ? (delta / prior) * 100 : null;
+      return {
+        hco_key: r.hco_key,
+        name: r.name,
+        hco_type: r.hco_type,
+        city: r.city,
+        state: r.state,
+        units_period: period,
+        units_prior: prior,
+        units_delta: delta,
+        units_delta_pct: pct,
+        dollars_period: Number(r.dollars_period) || 0,
+        dollars_prior: Number(r.dollars_prior) || 0,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Watch list: HCOs that had sales in the prior equal-length window and
+// ZERO sales in the current period. Pharma daily-action surface — "who
+// fell off this quarter that we need to chase." Sorted by prior-period
+// units (biggest stop-outs first). Surfaces current primary rep so the
+// action is unambiguous.
+//
+// Like loadAccountMotion: requires a real range (returns empty for
+// "all"); HCO-only (unmapped distributors are a different action and
+// covered by /admin/mappings).
+// ---------------------------------------------------------------------------
+
+export type WatchListRow = {
+  hco_key: string;
+  name: string;
+  hco_type: string | null;
+  city: string | null;
+  state: string | null;
+  units_prior: number;
+  dollars_prior: number;
+  // ISO date of the most recent sale ever (not just within the prior
+  // window). Useful to show "last seen 4 months ago" so admins gauge
+  // how cold the relationship is.
+  last_sale_date: string | null;
+  // Resolved primary-territory current rep — same chain as fact_sale
+  // attribution. Null when the HCO isn't bridged to any territory or
+  // the primary territory has no current Sales rep.
+  current_rep_user_key: string | null;
+  current_rep_name: string | null;
+};
+
+export async function loadWatchListAccounts(
+  tenantId: string,
+  filters: DashboardFilters,
+  limit = 10,
+  scope: Scope = NO_SCOPE,
+): Promise<WatchListRow[]> {
+  try {
+    const dates = rangeDates(filters.range);
+    if (!dates) return [];
+    const days = rangeDays(filters.range)!;
+    const periodStart = dates.start;
+    const periodEnd = dates.end;
+    const priorStart = isoDateMinusDays(periodStart, days);
+    const priorEnd = isoDateMinusDays(periodStart, 1);
+
+    const salesScope = rewriteScopeForSales(scope);
+    const params = {
+      ...filtersToParams(filters),
+      ...salesScope.params,
+      watchPeriodStart: periodStart,
+      watchPeriodEnd: periodEnd,
+      watchPriorStart: priorStart,
+      watchPriorEnd: priorEnd,
+    };
+
+    const rows = await queryFabric<{
+      hco_key: string;
+      name: string;
+      hco_type: string | null;
+      city: string | null;
+      state: string | null;
+      units_prior: number;
+      dollars_prior: number;
+      last_sale_date: string | null;
+      current_rep_user_key: string | null;
+      current_rep_name: string | null;
+    }>(
+      tenantId,
+      `WITH activity AS (
+         SELECT
+           h.hco_key,
+           h.name,
+           h.hco_type,
+           h.city,
+           h.state,
+           ROUND(SUM(CASE WHEN f.transaction_date >= @watchPeriodStart AND f.transaction_date <= @watchPeriodEnd THEN f.signed_units ELSE 0 END), 0) AS units_period,
+           ROUND(SUM(CASE WHEN f.transaction_date >= @watchPriorStart  AND f.transaction_date <= @watchPriorEnd  THEN f.signed_units ELSE 0 END), 0) AS units_prior,
+           ROUND(SUM(CASE WHEN f.transaction_date >= @watchPriorStart  AND f.transaction_date <= @watchPriorEnd  THEN f.signed_gross_dollars ELSE 0 END), 0) AS dollars_prior,
+           CONVERT(varchar(10), MAX(f.transaction_date), 23) AS last_sale_date
+         FROM gold.fact_sale f
+         JOIN gold.dim_hco h
+           ON h.hco_key = f.account_key
+           AND h.tenant_id = @tenantId
+         WHERE f.tenant_id = @tenantId
+           AND f.account_type = 'HCO'
+           AND f.transaction_date <= @watchPeriodEnd
+           ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}
+         GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
+       )
+       SELECT TOP ${limit}
+         a.hco_key, a.name, a.hco_type, a.city, a.state,
+         a.units_prior, a.dollars_prior, a.last_sale_date,
+         t.current_rep_user_key,
+         t.current_rep_name
+       FROM activity a
+       LEFT JOIN gold.bridge_account_territory b
+         ON b.tenant_id = @tenantId
+         AND b.account_key = a.hco_key
+         AND CAST(b.is_primary AS INT) = 1
+       LEFT JOIN gold.dim_territory t
+         ON t.tenant_id = b.tenant_id
+         AND t.territory_key = b.territory_key
+       WHERE a.units_prior > 0 AND a.units_period = 0
+       ORDER BY a.units_prior DESC`,
+      params,
+    );
+
+    return rows.map((r) => ({
+      hco_key: r.hco_key,
+      name: r.name,
+      hco_type: r.hco_type,
+      city: r.city,
+      state: r.state,
+      units_prior: Number(r.units_prior) || 0,
+      dollars_prior: Number(r.dollars_prior) || 0,
+      last_sale_date: r.last_sale_date,
+      current_rep_user_key: r.current_rep_user_key,
+      current_rep_name: r.current_rep_name,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// New accounts: HCOs whose FIRST-EVER sale falls inside the current
+// period. Sorted by units in the period (biggest new wins first) so the
+// list highlights material new business, not just net-count.
+//
+// "All" range returns empty — "first sale ever" needs a window to
+// land in.
+// ---------------------------------------------------------------------------
+
+export type NewAccountRow = {
+  hco_key: string;
+  name: string;
+  hco_type: string | null;
+  city: string | null;
+  state: string | null;
+  first_sale_date: string;
+  units_period: number;
+  dollars_period: number;
+  current_rep_user_key: string | null;
+  current_rep_name: string | null;
+};
+
+export async function loadNewAccounts(
+  tenantId: string,
+  filters: DashboardFilters,
+  limit = 10,
+  scope: Scope = NO_SCOPE,
+): Promise<NewAccountRow[]> {
+  try {
+    const dates = rangeDates(filters.range);
+    if (!dates) return [];
+    const periodStart = dates.start;
+    const periodEnd = dates.end;
+
+    const salesScope = rewriteScopeForSales(scope);
+    const params = {
+      ...filtersToParams(filters),
+      ...salesScope.params,
+      newPeriodStart: periodStart,
+      newPeriodEnd: periodEnd,
+    };
+
+    const rows = await queryFabric<{
+      hco_key: string;
+      name: string;
+      hco_type: string | null;
+      city: string | null;
+      state: string | null;
+      first_sale_date: string;
+      units_period: number;
+      dollars_period: number;
+      current_rep_user_key: string | null;
+      current_rep_name: string | null;
+    }>(
+      tenantId,
+      `WITH first_sale AS (
+         SELECT
+           h.hco_key,
+           h.name,
+           h.hco_type,
+           h.city,
+           h.state,
+           MIN(f.transaction_date) AS first_sale_date,
+           ROUND(SUM(CASE WHEN f.transaction_date >= @newPeriodStart AND f.transaction_date <= @newPeriodEnd THEN f.signed_units ELSE 0 END), 0) AS units_period,
+           ROUND(SUM(CASE WHEN f.transaction_date >= @newPeriodStart AND f.transaction_date <= @newPeriodEnd THEN f.signed_gross_dollars ELSE 0 END), 0) AS dollars_period
+         FROM gold.fact_sale f
+         JOIN gold.dim_hco h
+           ON h.hco_key = f.account_key
+           AND h.tenant_id = @tenantId
+         WHERE f.tenant_id = @tenantId
+           AND f.account_type = 'HCO'
+           AND f.transaction_date <= @newPeriodEnd
+           ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}
+         GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
+       )
+       SELECT TOP ${limit}
+         fs.hco_key, fs.name, fs.hco_type, fs.city, fs.state,
+         CONVERT(varchar(10), fs.first_sale_date, 23) AS first_sale_date,
+         fs.units_period,
+         fs.dollars_period,
+         t.current_rep_user_key,
+         t.current_rep_name
+       FROM first_sale fs
+       LEFT JOIN gold.bridge_account_territory b
+         ON b.tenant_id = @tenantId
+         AND b.account_key = fs.hco_key
+         AND CAST(b.is_primary AS INT) = 1
+       LEFT JOIN gold.dim_territory t
+         ON t.tenant_id = b.tenant_id
+         AND t.territory_key = b.territory_key
+       WHERE fs.first_sale_date >= @newPeriodStart
+         AND fs.first_sale_date <= @newPeriodEnd
+       ORDER BY fs.units_period DESC, fs.first_sale_date ASC`,
+      params,
+    );
+
+    return rows.map((r) => ({
+      hco_key: r.hco_key,
+      name: r.name,
+      hco_type: r.hco_type,
+      city: r.city,
+      state: r.state,
+      first_sale_date: r.first_sale_date,
+      units_period: Number(r.units_period) || 0,
+      dollars_period: Number(r.dollars_period) || 0,
+      current_rep_user_key: r.current_rep_user_key,
+      current_rep_name: r.current_rep_name,
+    }));
   } catch {
     return [];
   }
@@ -688,6 +1079,7 @@ export async function loadTopRepsBySales(
            AND f.rep_user_key IS NOT NULL
            ${dateFilter}
            ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}
          GROUP BY u.user_key, u.name, u.title
          ORDER BY ABS(SUM(f.signed_units)) DESC`,
         params,
@@ -706,7 +1098,8 @@ export async function loadTopRepsBySales(
          WHERE f.tenant_id = @tenantId
            AND f.rep_user_key IS NULL
            ${dateFilter}
-           ${scopeSql(salesScope)}`,
+           ${scopeSql(salesScope)}
+           ${territorySalesFilter(filters)}`,
         params,
       ),
     ]);
@@ -986,6 +1379,64 @@ export async function loadRepCurrentTerritoryKeys(
       { userKey },
     );
     return rows.map((r) => r.territory_key);
+  } catch {
+    return [];
+  }
+}
+
+// Territories the current user can choose from in the dashboard
+// territory filter. Scoped by role:
+//   admin/bypass — every active territory
+//   manager      — territories whose current Sales rep is in the team
+//   rep          — territories where this rep is the current Sales rep
+//
+// Returns description-first labels (per feedback_territory_display) plus
+// the Veeva code as a separate field so the dropdown can render both.
+export type AccessibleTerritory = {
+  territory_key: string;
+  label: string;
+  code: string;
+};
+
+export async function loadAccessibleTerritories(
+  tenantId: string,
+  userScope: UserScope,
+): Promise<AccessibleTerritory[]> {
+  try {
+    let whereExtra = "";
+    if (userScope.role === "rep") {
+      // Single key — bind via parameter so we don't have to escape.
+      whereExtra = "AND current_rep_user_key = @scopeUserKey";
+    } else if (userScope.role === "manager") {
+      if (userScope.userKeys.length === 0) return [];
+      // Same inline-IN pattern as scopeToSql() for managers — userKeys
+      // come from our own DB so they're trusted; still escape single
+      // quotes defensively.
+      const sanitized = userScope.userKeys.map(
+        (k) => `'${k.replace(/'/g, "''")}'`,
+      );
+      whereExtra = `AND current_rep_user_key IN (${sanitized.join(",")})`;
+    }
+
+    const rows = await queryFabric<{
+      territory_key: string;
+      name: string;
+      description: string | null;
+    }>(
+      tenantId,
+      `SELECT territory_key, name, description
+       FROM gold.dim_territory
+       WHERE tenant_id = @tenantId
+         AND COALESCE(status, '') IN ('', 'Active', 'active')
+         ${whereExtra}
+       ORDER BY COALESCE(description, name)`,
+      userScope.role === "rep" ? { scopeUserKey: userScope.userKey } : {},
+    );
+    return rows.map((r) => ({
+      territory_key: r.territory_key,
+      label: r.description ?? r.name,
+      code: r.name,
+    }));
   } catch {
     return [];
   }

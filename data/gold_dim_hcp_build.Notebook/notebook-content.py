@@ -26,9 +26,21 @@
 # Star-schema HCP dimension. Built from `silver.hcp`. Adds:
 #   - **`hcp_key`** — deterministic MD5 surrogate key (tenant_id + veeva_account_id).
 #     Stable across rebuilds, suitable for fact_call FK joins.
+#   - **`primary_parent_hco_key`** — surrogate of the HCP's primary parent HCO
+#     (Veeva's account.primary_parent__v). Computed using the same MD5
+#     formula as dim_hco.hco_key so downstream surfaces can group HCPs by
+#     affiliation without a runtime JOIN.
+#   - **`primary_parent_hco_name`** — denormalized parent HCO name from
+#     LEFT JOIN to dim_hco. NULL when the parent_account_id points at an
+#     HCO that's been filtered out of dim_hco (deleted / inactive / etc.)
+#     — the surrogate key is still populated so a re-resolve is possible.
 # Otherwise mostly a passthrough projection — silver.hcp is already clean,
-# deduped, and picklist-translated. Gold's job here is mainly the surrogate
-# key and dropping silver-internal columns.
+# deduped, and picklist-translated. Gold's job here is the surrogate keys
+# and dropping silver-internal columns.
+#
+# Build dependency: gold.dim_hco must be built before this notebook so
+# the parent-name LEFT JOIN finds rows. The orchestrators sequence
+# dim_hco → dim_hcp; running standalone, run dim_hco first.
 
 # CELL ********************
 
@@ -69,6 +81,11 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   tier                 STRING,
   account_type         STRING,
   source_id            STRING,
+  -- HCO affiliation (Veeva primary_parent__v). Raw account_id from
+  -- silver, plus the resolved surrogate key + name from dim_hco.
+  primary_parent_account_id STRING,
+  primary_parent_hco_key    STRING,
+  primary_parent_hco_name   STRING,
   gold_built_at        TIMESTAMP NOT NULL
 ) USING DELTA
 """)
@@ -84,34 +101,50 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
 
 result = spark.sql(f"""
 SELECT
-  md5(concat_ws('|', tenant_id, veeva_account_id))  AS hcp_key,
-  tenant_id,
-  veeva_account_id,
-  network_id,
-  dea_number,
-  source_system,
-  npi,
-  name,
-  first_name,
-  last_name,
-  credentials,
-  specialty_primary,
-  specialty_secondary,
-  gender,
-  email,
-  city,
-  state,
-  postal_code,
-  country,
-  is_prescriber,
-  is_kol,
-  is_speaker,
-  status,
-  tier,
-  account_type,
-  source_id,
+  md5(concat_ws('|', s.tenant_id, s.veeva_account_id))  AS hcp_key,
+  s.tenant_id,
+  s.veeva_account_id,
+  s.network_id,
+  s.dea_number,
+  s.source_system,
+  s.npi,
+  s.name,
+  s.first_name,
+  s.last_name,
+  s.credentials,
+  s.specialty_primary,
+  s.specialty_secondary,
+  s.gender,
+  s.email,
+  s.city,
+  s.state,
+  s.postal_code,
+  s.country,
+  s.is_prescriber,
+  s.is_kol,
+  s.is_speaker,
+  s.status,
+  s.tier,
+  s.account_type,
+  s.source_id,
+  s.primary_parent_account_id,
+  -- Compute parent HCO surrogate key with the same MD5 formula
+  -- dim_hco uses, so JOINs from this column to dim_hco.hco_key
+  -- work without an extra resolve step elsewhere.
+  CASE
+    WHEN s.primary_parent_account_id IS NOT NULL AND s.primary_parent_account_id <> ''
+    THEN md5(concat_ws('|', s.tenant_id, s.primary_parent_account_id))
+    ELSE NULL
+  END AS primary_parent_hco_key,
+  -- LEFT JOIN to dim_hco for the readable name. NULL when the parent
+  -- HCO is missing from dim_hco (filtered, deleted, etc.) — surrogate
+  -- key above stays populated so the link can be re-resolved later.
+  hco.name AS primary_parent_hco_name,
   current_timestamp() AS gold_built_at
-FROM {SILVER_TABLE}
+FROM {SILVER_TABLE} s
+LEFT JOIN gold.dim_hco hco
+  ON hco.tenant_id = s.tenant_id
+  AND hco.hco_key = md5(concat_ws('|', s.tenant_id, s.primary_parent_account_id))
 """)
 row_count = result.count()
 
@@ -137,6 +170,28 @@ print("=== Sample 5 rows ===")
 spark.sql(f"""
   SELECT hcp_key, name, npi, specialty_primary, state, tier, status
   FROM {GOLD_TABLE}
+  LIMIT 5
+""").show(truncate=False)
+
+print("=== HCO affiliation coverage ===")
+spark.sql(f"""
+  SELECT
+    COUNT(*) AS total_hcps,
+    SUM(CASE WHEN primary_parent_hco_key IS NOT NULL THEN 1 ELSE 0 END) AS with_parent_key,
+    SUM(CASE WHEN primary_parent_hco_name IS NOT NULL THEN 1 ELSE 0 END) AS with_parent_name,
+    ROUND(
+      100.0 * SUM(CASE WHEN primary_parent_hco_name IS NOT NULL THEN 1 ELSE 0 END)
+      / COUNT(*),
+      1
+    ) AS pct_with_resolved_name
+  FROM {GOLD_TABLE}
+""").show(truncate=False)
+
+print("=== Sample 5 affiliated HCPs ===")
+spark.sql(f"""
+  SELECT name, primary_parent_hco_name
+  FROM {GOLD_TABLE}
+  WHERE primary_parent_hco_name IS NOT NULL
   LIMIT 5
 """).show(truncate=False)
 

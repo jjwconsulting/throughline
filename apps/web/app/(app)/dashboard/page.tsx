@@ -5,7 +5,9 @@ import {
   loadTopReps,
   loadTopHcps,
   loadTopHcos,
+  loadTierCoverage,
 } from "@/lib/interactions";
+import { loadTeamRollup } from "@/lib/team";
 import {
   loadSalesKpis,
   loadSalesTrend,
@@ -13,6 +15,10 @@ import {
   loadTopHcosBySales,
   loadTopRepsBySales,
   loadRepCurrentTerritoryKeys,
+  loadAccountMotion,
+  loadWatchListAccounts,
+  loadNewAccounts,
+  loadAccessibleTerritories,
 } from "@/lib/sales";
 import { getCurrentScope, scopeToSql } from "@/lib/scope";
 import { loadHcpInactivitySignals } from "@/lib/signals";
@@ -55,6 +61,24 @@ function deltaLabel(current: number, prior: number): string | null {
   return `${sign}${pct.toFixed(0)}% vs prior period`;
 }
 
+// Color band for attainment % cells in the team rollup. Mirrors the
+// thresholds used on the tier coverage panel so the dashboard reads
+// consistently. Null = no goal / no measurement → muted.
+function attainColor(pct: number | null): string {
+  if (pct == null) return "text-[var(--color-ink-muted)]";
+  if (pct >= 90) return "text-[var(--color-positive)]";
+  if (pct >= 70) return "text-[var(--color-ink)]";
+  return "text-[var(--color-negative)]";
+}
+
+function daysAgo(isoDate: string): number {
+  const d = new Date(isoDate);
+  return Math.max(
+    0,
+    Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24)),
+  );
+}
+
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export default async function Dashboard({
@@ -78,45 +102,73 @@ export default async function Dashboard({
   // filter has a concrete date range (skip "all"). Sums all overlapping
   // goal portions for the window — handles 12w spanning Q1+Q2 correctly.
   const dateRange = rangeDates(filters.range);
-  const goalLookup = dateRange
-    ? loadOverlappingGoalSum({
-        tenantId,
-        metric: "calls",
-        entityType: "rep",
-        entityFilter:
-          scope.role === "rep"
-            ? { type: "single", id: scope.userKey }
-            : { type: "all" },
-        rangeStart: dateRange.start,
-        rangeEnd: dateRange.end,
-      })
-    : Promise.resolve(null);
-  // Units goal lookup: territory-entity (pharma standard). For a rep-role
-  // user the "effective goal" sums goals on territories where they're the
-  // current primary rep — same model as /reps/[user_key]. For admin /
-  // manager / bypass we fall through to tenant-wide sum (mirrors the
-  // calls-goal behavior; tightening manager scope is queued).
-  const unitsGoalLookup = dateRange
-    ? scope.role === "rep"
-      ? loadRepCurrentTerritoryKeys(tenantId, scope.userKey).then((ids) =>
-          loadOverlappingGoalSum({
-            tenantId,
-            metric: "units",
-            entityType: "territory",
-            entityFilter: { type: "in", ids },
-            rangeStart: dateRange.start,
-            rangeEnd: dateRange.end,
-          }),
-        )
-      : loadOverlappingGoalSum({
+  // Calls goal lookup. Suppressed entirely when a territory filter is
+  // active — call goals live at the REP entity, and a multi-territory
+  // rep's full goal can't be honestly pro-rated to one of their N
+  // territories. Showing a tenant-wide goal denominator next to a
+  // territory-narrowed actual would skew attainment to look artificially
+  // low. Falls back to vs-prior delta instead, which DOES narrow
+  // correctly because both period and prior actuals share the filter.
+  const goalLookup =
+    dateRange && !filters.territory
+      ? loadOverlappingGoalSum({
           tenantId,
-          metric: "units",
-          entityType: "territory",
-          entityFilter: { type: "all" },
+          metric: "calls",
+          entityType: "rep",
+          entityFilter:
+            scope.role === "rep"
+              ? { type: "single", id: scope.userKey }
+              : { type: "all" },
           rangeStart: dateRange.start,
           rangeEnd: dateRange.end,
         })
+      : Promise.resolve(null);
+  // Units goal lookup: territory-entity. Cleanly slices by territory
+  // since the goal entity IS territory — when filter is set we just
+  // narrow to that one territory's goal. Otherwise: rep-role uses
+  // their effective goal (sum across current territories); admin /
+  // manager / bypass use tenant-wide sum.
+  const unitsGoalLookup = dateRange
+    ? filters.territory
+      ? loadOverlappingGoalSum({
+          tenantId,
+          metric: "units",
+          entityType: "territory",
+          entityFilter: { type: "single", id: filters.territory },
+          rangeStart: dateRange.start,
+          rangeEnd: dateRange.end,
+        })
+      : scope.role === "rep"
+        ? loadRepCurrentTerritoryKeys(tenantId, scope.userKey).then((ids) =>
+            loadOverlappingGoalSum({
+              tenantId,
+              metric: "units",
+              entityType: "territory",
+              entityFilter: { type: "in", ids },
+              rangeStart: dateRange.start,
+              rangeEnd: dateRange.end,
+            }),
+          )
+        : loadOverlappingGoalSum({
+            tenantId,
+            metric: "units",
+            entityType: "territory",
+            entityFilter: { type: "all" },
+            rangeStart: dateRange.start,
+            rangeEnd: dateRange.end,
+          })
     : Promise.resolve(null);
+
+  // Load accessible territories first — both the FilterBar (renders the
+  // dropdown) and loadTierCoverage (needs the key list to scope the HCP
+  // universe) depend on it. One extra round-trip; the query is cheap.
+  const accessibleTerritories = await loadAccessibleTerritories(
+    tenantId,
+    scope,
+  );
+  const accessibleTerritoryKeys = accessibleTerritories.map(
+    (t) => t.territory_key,
+  );
 
   const [
     kpis,
@@ -132,6 +184,12 @@ export default async function Dashboard({
     topUnmapped,
     topHcosBySales,
     topRepsBySales,
+    risingAccounts,
+    decliningAccounts,
+    watchList,
+    newAccounts,
+    tierCoverage,
+    teamRollup,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, rlsScope),
     loadTrend(tenantId, filters, rlsScope),
@@ -156,6 +214,12 @@ export default async function Dashboard({
     loadTopUnmappedDistributors(tenantId, filters, 10),
     loadTopHcosBySales(tenantId, filters, 10, rlsScope),
     loadTopRepsBySales(tenantId, filters, 10, rlsScope),
+    loadAccountMotion(tenantId, filters, "rising", 10, rlsScope),
+    loadAccountMotion(tenantId, filters, "declining", 10, rlsScope),
+    loadWatchListAccounts(tenantId, filters, 10, rlsScope),
+    loadNewAccounts(tenantId, filters, 10, rlsScope),
+    loadTierCoverage(tenantId, filters, accessibleTerritoryKeys, rlsScope),
+    loadTeamRollup(tenantId, scope, filters),
   ]);
 
   const period = periodLabel(filters.range);
@@ -234,7 +298,7 @@ export default async function Dashboard({
             Live from gold tables. Filters apply to all panels below.
           </p>
         </div>
-        <FilterBar filters={filters} />
+        <FilterBar filters={filters} territories={accessibleTerritories} />
       </div>
 
       <div className="space-y-3">
@@ -328,6 +392,171 @@ export default async function Dashboard({
         signals={inactivitySignals}
         emptyHint="No lapsed HCPs in your scope. Either coverage is current or the data window is too narrow."
       />
+
+      {tierCoverage.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">HCP tier coverage</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Share of in-scope HCPs in each tier with at least one
+              interaction in {period}. Universe is HCPs assigned to any
+              {filters.territory ? " selected " : " visible "}territory in
+              Veeva.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2">Tier</th>
+                <th className="text-right font-normal px-5 py-2">Total HCPs</th>
+                <th className="text-right font-normal px-5 py-2">Contacted</th>
+                <th className="text-right font-normal px-5 py-2">No activity</th>
+                <th className="text-right font-normal px-5 py-2">% Contacted</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tierCoverage.map((row) => {
+                const pct = Number(row.pct_contacted) || 0;
+                // Color the % cell green when ≥80% (healthy coverage),
+                // amber-ish when 50-79%, red when <50%. Tier 1 thresholds
+                // could be stricter later; keep universal for v1.
+                const pctColor =
+                  pct >= 80
+                    ? "text-[var(--color-positive)]"
+                    : pct >= 50
+                      ? "text-[var(--color-ink)]"
+                      : "text-[var(--color-negative)]";
+                return (
+                  <tr
+                    key={row.tier}
+                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                  >
+                    <td className="px-5 py-2">
+                      {row.tier === "Unknown" ? (
+                        <span className="text-[var(--color-ink-muted)] italic">
+                          Unknown
+                        </span>
+                      ) : (
+                        `Tier ${row.tier}`
+                      )}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                      {formatNumber(Number(row.total_hcps) || 0)}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono">
+                      {formatNumber(Number(row.contacted) || 0)}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                      {formatNumber(Number(row.no_activity) || 0)}
+                    </td>
+                    <td
+                      className={`px-5 py-2 text-right font-mono ${pctColor}`}
+                    >
+                      {pct}%
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {teamRollup.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">
+              {scope.role === "manager" ? "Your team" : "All reps"}
+            </h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              {teamRollup.length} rep{teamRollup.length === 1 ? "" : "s"} in
+              {scope.role === "manager" ? " your team" : " the tenant"} —
+              sorted by sales attainment (lowest first). Click a name for
+              their detail page.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2">Rep</th>
+                <th className="text-right font-normal px-5 py-2">Calls</th>
+                <th className="text-right font-normal px-5 py-2">
+                  Calls attain
+                </th>
+                <th className="text-right font-normal px-5 py-2">Net units</th>
+                <th className="text-right font-normal px-5 py-2">
+                  Units attain
+                </th>
+                <th className="text-left font-normal px-5 py-2">Last call</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teamRollup.map((r) => (
+                <tr
+                  key={r.user_key}
+                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                >
+                  <td className="px-5 py-2">
+                    <Link
+                      href={`/reps/${encodeURIComponent(r.user_key)}`}
+                      className="text-[var(--color-primary)] hover:underline"
+                    >
+                      {r.name}
+                    </Link>
+                    {r.title ? (
+                      <div className="text-xs text-[var(--color-ink-muted)]">
+                        {r.title}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono">
+                    {formatNumber(r.calls_period)}
+                  </td>
+                  <td
+                    className={`px-5 py-2 text-right font-mono ${attainColor(r.calls_attainment_pct)}`}
+                    title={
+                      r.calls_goal != null
+                        ? `${formatNumber(r.calls_period)} / ${formatNumber(Math.round(r.calls_goal))}`
+                        : "No call goal set"
+                    }
+                  >
+                    {r.calls_attainment_pct != null
+                      ? `${Math.round(r.calls_attainment_pct)}%`
+                      : "—"}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono">
+                    {formatNumber(Math.round(r.net_units_period))}
+                  </td>
+                  <td
+                    className={`px-5 py-2 text-right font-mono ${attainColor(r.units_attainment_pct)}`}
+                    title={
+                      r.units_goal != null
+                        ? `${formatNumber(Math.round(r.net_units_period))} / ${formatNumber(Math.round(r.units_goal))}`
+                        : "No effective units goal (no current territories with goals)"
+                    }
+                  >
+                    {r.units_attainment_pct != null
+                      ? `${Math.round(r.units_attainment_pct)}%`
+                      : "—"}
+                  </td>
+                  <td
+                    className={
+                      "px-5 py-2 " +
+                      (r.last_call_date && daysAgo(r.last_call_date) > 7
+                        ? "text-[var(--color-ink-muted)]"
+                        : "")
+                    }
+                  >
+                    {r.last_call_date
+                      ? `${daysAgo(r.last_call_date)}d ago`
+                      : "Never"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
@@ -608,6 +837,300 @@ export default async function Dashboard({
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {risingAccounts.length > 0 || decliningAccounts.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--color-border)]">
+              <h2 className="font-display text-lg">Top rising accounts</h2>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                Largest unit gains in {period} vs the prior equal-length
+                window. Customers in both periods only.
+              </p>
+            </div>
+            {risingAccounts.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
+                No rising accounts in this window.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-[var(--color-ink-muted)]">
+                  <tr>
+                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                    <th className="text-left font-normal px-5 py-2">HCO</th>
+                    <th className="text-right font-normal px-5 py-2">Prior</th>
+                    <th className="text-right font-normal px-5 py-2">Period</th>
+                    <th className="text-right font-normal px-5 py-2">Δ Units</th>
+                    <th className="text-right font-normal px-5 py-2">Δ %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {risingAccounts.map((a, i) => (
+                    <tr
+                      key={a.hco_key}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">
+                        <Link
+                          href={`/hcos/${encodeURIComponent(a.hco_key)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {a.name}
+                        </Link>
+                        {a.city || a.state ? (
+                          <div className="text-xs text-[var(--color-ink-muted)]">
+                            {[a.city, a.state].filter(Boolean).join(", ")}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                        {formatNumber(Math.round(a.units_prior))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatNumber(Math.round(a.units_period))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-positive)]">
+                        +{formatNumber(Math.round(a.units_delta))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-positive)]">
+                        {a.units_delta_pct != null
+                          ? `+${a.units_delta_pct.toFixed(0)}%`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--color-border)]">
+              <h2 className="font-display text-lg">Top declining accounts</h2>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                Largest unit losses in {period} vs the prior equal-length
+                window. Stop-outs (zero this period) appear in the watch
+                list, not here.
+              </p>
+            </div>
+            {decliningAccounts.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
+                No declining accounts in this window.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-[var(--color-ink-muted)]">
+                  <tr>
+                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                    <th className="text-left font-normal px-5 py-2">HCO</th>
+                    <th className="text-right font-normal px-5 py-2">Prior</th>
+                    <th className="text-right font-normal px-5 py-2">Period</th>
+                    <th className="text-right font-normal px-5 py-2">Δ Units</th>
+                    <th className="text-right font-normal px-5 py-2">Δ %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {decliningAccounts.map((a, i) => (
+                    <tr
+                      key={a.hco_key}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">
+                        <Link
+                          href={`/hcos/${encodeURIComponent(a.hco_key)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {a.name}
+                        </Link>
+                        {a.city || a.state ? (
+                          <div className="text-xs text-[var(--color-ink-muted)]">
+                            {[a.city, a.state].filter(Boolean).join(", ")}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                        {formatNumber(Math.round(a.units_prior))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatNumber(Math.round(a.units_period))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-negative)]">
+                        {formatNumber(Math.round(a.units_delta))}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono text-[var(--color-negative)]">
+                        {a.units_delta_pct != null
+                          ? `${a.units_delta_pct.toFixed(0)}%`
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {watchList.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">Watch list</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Accounts that bought in the prior {period.toLowerCase()} but
+              have ZERO sales in the current window. Sorted by prior-period
+              units (biggest stop-outs first).
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">HCO</th>
+                <th className="text-left font-normal px-5 py-2">Location</th>
+                <th className="text-left font-normal px-5 py-2">Last sale</th>
+                <th className="text-left font-normal px-5 py-2">Current rep</th>
+                <th className="text-right font-normal px-5 py-2">Prior units</th>
+                <th className="text-right font-normal px-5 py-2">
+                  Prior dollars
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {watchList.map((w, i) => (
+                <tr
+                  key={w.hco_key}
+                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                >
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {i + 1}
+                  </td>
+                  <td className="px-5 py-2">
+                    <Link
+                      href={`/hcos/${encodeURIComponent(w.hco_key)}`}
+                      className="text-[var(--color-primary)] hover:underline"
+                    >
+                      {w.name}
+                    </Link>
+                    {w.hco_type ? (
+                      <div className="text-xs text-[var(--color-ink-muted)]">
+                        {w.hco_type}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {[w.city, w.state].filter(Boolean).join(", ") || "—"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {w.last_sale_date ?? "—"}
+                  </td>
+                  <td className="px-5 py-2">
+                    {w.current_rep_user_key ? (
+                      <Link
+                        href={`/reps/${encodeURIComponent(w.current_rep_user_key)}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {w.current_rep_name ?? "—"}
+                      </Link>
+                    ) : (
+                      <span className="text-[var(--color-ink-muted)] italic">
+                        No rep
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono">
+                    {formatNumber(Math.round(w.units_prior))}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                    {formatCompactDollars(w.dollars_prior)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {newAccounts.length > 0 ? (
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">New accounts</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              HCOs whose first-ever sale fell inside {period}. Sorted by
+              units in the window so material wins surface first.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
+              <tr>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">HCO</th>
+                <th className="text-left font-normal px-5 py-2">Location</th>
+                <th className="text-left font-normal px-5 py-2">First sale</th>
+                <th className="text-left font-normal px-5 py-2">Current rep</th>
+                <th className="text-right font-normal px-5 py-2">Units</th>
+                <th className="text-right font-normal px-5 py-2">Net dollars</th>
+              </tr>
+            </thead>
+            <tbody>
+              {newAccounts.map((n, i) => (
+                <tr
+                  key={n.hco_key}
+                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                >
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {i + 1}
+                  </td>
+                  <td className="px-5 py-2">
+                    <Link
+                      href={`/hcos/${encodeURIComponent(n.hco_key)}`}
+                      className="text-[var(--color-primary)] hover:underline"
+                    >
+                      {n.name}
+                    </Link>
+                    {n.hco_type ? (
+                      <div className="text-xs text-[var(--color-ink-muted)]">
+                        {n.hco_type}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {[n.city, n.state].filter(Boolean).join(", ") || "—"}
+                  </td>
+                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                    {n.first_sale_date}
+                  </td>
+                  <td className="px-5 py-2">
+                    {n.current_rep_user_key ? (
+                      <Link
+                        href={`/reps/${encodeURIComponent(n.current_rep_user_key)}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {n.current_rep_name ?? "—"}
+                      </Link>
+                    ) : (
+                      <span className="text-[var(--color-ink-muted)] italic">
+                        No rep
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono">
+                    {formatNumber(Math.round(n.units_period))}
+                  </td>
+                  <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
+                    {formatCompactDollars(n.dollars_period)}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

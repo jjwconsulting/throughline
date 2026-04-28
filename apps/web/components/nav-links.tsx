@@ -7,6 +7,7 @@ import { Icon, type IconName } from "./icon";
 const MAIN_LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { href: "/inbox", label: "Inbox", icon: "inbox" },
+  { href: "/explore", label: "Explore", icon: "explore" },
   { href: "/reports", label: "Reports", icon: "reports" },
   { href: "/admin/tenants", label: "Admin", icon: "admin" },
   { href: "/settings", label: "Settings", icon: "settings" },
@@ -24,6 +25,7 @@ function isActive(href: string, pathname: string) {
       pathname.startsWith("/reps")
     );
   }
+  if (href === "/explore") return pathname.startsWith("/explore");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

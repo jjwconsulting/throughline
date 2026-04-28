@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import {
   CALL_CHANNELS,
@@ -15,19 +15,42 @@ import {
   type TimeRange,
 } from "./filters";
 
-export default function FilterBar({ filters }: { filters: DashboardFilters }) {
+export type FilterBarTerritory = {
+  territory_key: string;
+  label: string;
+  code: string;
+};
+
+export default function FilterBar({
+  filters,
+  territories = [],
+}: {
+  filters: DashboardFilters;
+  // Server-loaded list of territories the current user can pick from.
+  // Empty array hides the dropdown; one or more shows "All" + each.
+  territories?: FilterBarTerritory[];
+}) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
 
   function update(next: Partial<DashboardFilters>) {
     const merged = { ...filters, ...next };
-    const params = new URLSearchParams();
-    if (merged.range !== DEFAULT_FILTERS.range) params.set("range", merged.range);
-    if (merged.channel !== DEFAULT_FILTERS.channel)
-      params.set("channel", merged.channel);
-    if (merged.granularity !== DEFAULT_FILTERS.granularity)
-      params.set("granularity", merged.granularity);
+    // Start from existing params so we preserve URL state owned by
+    // OTHER components on the page (e.g. /explore's row + metric
+    // pickers). Only set/delete the filter keys this bar manages —
+    // delete on default to keep URLs clean when nothing's selected.
+    const params = new URLSearchParams(searchParams.toString());
+    if (merged.range === DEFAULT_FILTERS.range) params.delete("range");
+    else params.set("range", merged.range);
+    if (merged.channel === DEFAULT_FILTERS.channel) params.delete("channel");
+    else params.set("channel", merged.channel);
+    if (merged.granularity === DEFAULT_FILTERS.granularity)
+      params.delete("granularity");
+    else params.set("granularity", merged.granularity);
+    if (merged.territory) params.set("territory", merged.territory);
+    else params.delete("territory");
     const qs = params.toString();
     startTransition(() => {
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -63,6 +86,21 @@ export default function FilterBar({ filters }: { filters: DashboardFilters }) {
         onChange={(v) => update({ channel: v as CallChannel })}
         disabled={pending}
       />
+      {territories.length > 0 ? (
+        <Select
+          label="Territory"
+          value={filters.territory ?? ""}
+          options={[
+            { value: "", label: "All territories" },
+            ...territories.map((t) => ({
+              value: t.territory_key,
+              label: t.label,
+            })),
+          ]}
+          onChange={(v) => update({ territory: v === "" ? null : v })}
+          disabled={pending}
+        />
+      ) : null}
       {pending ? (
         <span className="text-xs text-[var(--color-ink-muted)]">Updating…</span>
       ) : null}

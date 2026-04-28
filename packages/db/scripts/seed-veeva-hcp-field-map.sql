@@ -51,7 +51,12 @@ CROSS JOIN (VALUES
   ('segmentation',        'segmentations__v'),
   ('tier',                'fen_hcp_tier__c'),
   ('account_type',        'fen_hcp_account_type__c'),
-  ('source_id',           'fen_fenid__c')
+  ('source_id',           'fen_fenid__c'),
+  -- Primary parent HCO link. Standard Veeva field; carries the
+  -- account_id of the HCP's affiliated parent organization. Resolved
+  -- to hco_key + name in gold.dim_hcp so /explore can group HCPs by
+  -- their HCO affiliation.
+  ('primary_parent_account_id', 'primary_parent__v')
 ) AS v(silver_column, bronze_column)
 WHERE t.slug = 'acme-pharma'
 ON CONFLICT (tenant_id, silver_table, silver_column) DO UPDATE
