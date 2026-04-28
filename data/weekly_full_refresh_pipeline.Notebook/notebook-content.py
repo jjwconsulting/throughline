@@ -181,6 +181,8 @@ STEPS = [
     "silver_call_build",
     "silver_sale_build",
     "silver_account_xref_build",
+    "silver_hcp_attribute_build",
+    "silver_hco_attribute_build",
     "gold_dim_date_build",
     "gold_dim_hcp_build",
     "gold_dim_hco_build",
@@ -190,6 +192,10 @@ STEPS = [
     "gold_bridge_account_territory_build",
     "gold_fact_call_build",
     "gold_fact_sale_build",
+    "gold_dim_hcp_attribute_build",
+    "gold_dim_hco_attribute_build",
+    "gold_dim_hcp_score_wide_build",
+    "gold_hcp_target_score_build",
 ]
 
 run_orchestrator(

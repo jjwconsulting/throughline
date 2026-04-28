@@ -114,6 +114,8 @@ TABLES = [
     "silver.call",
     "silver.sale",
     "silver.account_xref",
+    "silver.hcp_attribute",
+    "silver.hco_attribute",
     "gold.dim_date",
     "gold.dim_hcp",
     "gold.dim_hco",
@@ -124,6 +126,10 @@ TABLES = [
     "gold.fact_call",
     "gold.fact_sale",
     "gold.fact_goal",
+    "gold.dim_hcp_attribute",
+    "gold.dim_hco_attribute",
+    "gold.dim_hcp_score_wide",
+    "gold.hcp_target_score",
 ]
 
 VACUUM_RETAIN_HOURS = 168

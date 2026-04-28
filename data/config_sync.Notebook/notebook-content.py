@@ -118,6 +118,17 @@ TABLE_QUERIES = {
                user_email, effective_territory_ids, updated_at
         FROM public.tenant_user
     """,
+    "tenant_attribute_map": """
+        SELECT id::text AS id, tenant_id::text AS tenant_id,
+               source_system::text AS source_system,
+               bronze_table, bronze_column,
+               attribute_name,
+               entity_type::text AS entity_type,
+               attribute_type::text AS attribute_type,
+               source_label, scope_tag,
+               active, updated_at, updated_by
+        FROM public.tenant_attribute_map
+    """,
 }
 
 # %%

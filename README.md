@@ -95,7 +95,19 @@ Requires Node 20+ and pnpm 9+.
 
 **LLM expansion v1 SHIPPED.** All three surfaces from `docs/product/llm-expansion.md` are live: synopsis (`/dashboard`), action recommendations (`/reps/[user_key]`), conversational analytics (`/ask`). Each uses the narrator-over-input pattern (LLM never invents — every fact comes from a tool result), per-(entity × pipeline_run) caching with 4h rate-limit, and tenant + role isolation enforced at the loader layer.
 
-**Next major lift:** tenant-custom HCP/HCO attributes Phase 2 (silver_hcp_attribute_build + silver_hco_attribute_build notebooks, gold rollup tables, composite `gold.hcp_target_score`, LLM input wiring via the existing `predictions.hcp_target_scores` placeholder field on rep-recommendations input). Phase 1 (schema + admin UI + migration) is live 2026-04-28; admins can configure mappings now but they sit inert until Phase 2 builds the ingestion. Spec at `docs/architecture/tenant-custom-attributes.md`. Until Phase 2 lands, action recommendations on `/reps/[user_key]` lean on coverage + motion signals only.
+**Tenant-custom attributes Phase 2 SHIPPED 2026-04-28.** End-to-end pipeline now wires third-party scoring data (Komodo deciles, Clarivate volumes, etc.) from bronze → silver long-format → gold composite → LLM rep-recommendations:
+- `silver_hcp_attribute_build` + `silver_hco_attribute_build` (config-driven STACK unpivot from bronze; resilient to missing columns)
+- `gold.dim_hcp_attribute` + `gold.dim_hco_attribute` (long format with parsed `attribute_value_num` per-type)
+- `gold.dim_hcp_score_wide` (per-tenant pivot for fast joins)
+- `gold.hcp_target_score` (composite 0-100 per (HCP × scope_tag); type-aware rank-normalization: deciles/percentiles direct, scores/volumes percent_rank within tenant, flags 0/100; per-scope rows + synthetic `__all__` cross-scope row; top-5 contributors as JSON for LLM rationale)
+- `lib/hcp-target-scores.ts` loader: `loadHcpTargetScoresByKeys` enriches known HCPs; `loadTopScoringUncalledHcpsForRep` finds high-scoring HCPs in rep's coverage with no recent calls (the actionable surface)
+- Wired into rep-recommendations: `predictions.hcp_target_scores` populated with top-10 scoring uncalled HCPs in rep coverage; system prompt instructs LLM to weight `score_value >= 80` as high-priority regardless of tier; `top_5_called_hcps` enriched with `target_score` for "is the rep spending calls on the right HCPs" reasoning
+- All builds added to `incremental_refresh_pipeline` + `weekly_full_refresh_pipeline` + `delta_maintenance_pipeline`
+- `tenant_attribute_map` added to `config_sync` so Fabric mirror stays current
+
+Phase 2 effort: 1 session. Verification pending — needs the next Fabric pipeline run to populate gold tables; recommendation quality lift visible on `/reps/[user_key]` after that.
+
+**Next major lift:** TBD. See "Still open" below + `project_v2_product_backlog` memory for queued items (Rep action launchpad, Email digest, Tests, Mapping kinds beyond account_xref).
 
 ## Still open
 

@@ -181,6 +181,12 @@ STEPS = [
     "silver_call_build",
     "silver_sale_build",
     "silver_account_xref_build",
+    # Tenant-custom attribute long-format silver builds. Read
+    # config.tenant_attribute_map; emit one row per (entity, attribute)
+    # from each declared bronze column. No-op when no mappings configured
+    # (writes empty Delta). Spec: docs/architecture/tenant-custom-attributes.md.
+    "silver_hcp_attribute_build",
+    "silver_hco_attribute_build",
     "gold_dim_date_build",
     "gold_dim_hcp_build",
     "gold_dim_hco_build",
@@ -190,6 +196,13 @@ STEPS = [
     "gold_bridge_account_territory_build",
     "gold_fact_call_build",
     "gold_fact_sale_build",
+    # Attribute gold layer. Depends on dim_hcp/dim_hco for the
+    # surrogate key join. Long-format → wide pivot → composite score.
+    # Composite is the LLM-consumed abstraction (lib/hcp-target-scores.ts).
+    "gold_dim_hcp_attribute_build",
+    "gold_dim_hco_attribute_build",
+    "gold_dim_hcp_score_wide_build",
+    "gold_hcp_target_score_build",
 ]
 
 run_orchestrator(

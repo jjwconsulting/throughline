@@ -26,6 +26,10 @@ import {
 } from "@/lib/sales";
 import { loadTopHcps, repScope, type Scope } from "@/lib/interactions";
 import { queryFabric } from "@/lib/fabric";
+import {
+  loadHcpTargetScoresByKeys,
+  loadTopScoringUncalledHcpsForRep,
+} from "@/lib/hcp-target-scores";
 import { DEFAULT_FILTERS } from "@/app/(app)/dashboard/filters";
 
 const MODEL = "claude-sonnet-4-6";
@@ -261,6 +265,13 @@ async function gatherRecommendationInputs(
     watch,
     topCalled,
     underactiveCoverage,
+    // Top-scoring uncalled HCPs in rep's coverage. The whole point of
+    // tenant-custom attributes Phase 2 — surfaces "rep has explicit
+    // coverage of these high-scoring HCPs but hasn't engaged in 8+ wks."
+    // Returns [] when no scoring attributes are configured (Phase 2
+    // builds run with no input → empty gold.hcp_target_score → empty
+    // result), so this degrades gracefully on un-configured tenants.
+    topScoringUncalled,
   ] = await Promise.all([
     queryFabric<{
       name: string;
@@ -279,6 +290,12 @@ async function gatherRecommendationInputs(
     loadWatchListAccounts(tenantId, filters, 5, repSqlScope),
     loadTopHcps(tenantId, filters, repSqlScope),
     loadUnderactiveCoverageHcos(tenantId, repUserKey, underactiveSince, 10),
+    loadTopScoringUncalledHcpsForRep({
+      tenantId,
+      repUserKey,
+      recentlyCalledSinceISO: underactiveSince,
+      limit: 10,
+    }),
   ]);
 
   const repMeta = repMetaRows[0] ?? {
@@ -314,7 +331,11 @@ async function gatherRecommendationInputs(
   const escIn = (keys: string[]) =>
     keys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",");
 
-  const [hcoTierRows, hcpTierRows] = await Promise.all([
+  // Batch enrichment: tier for every HCO/HCP in the input + composite
+  // target score for every HCP in the input. Three parallel round-trips.
+  // Target scores returns empty when no attribute mappings configured —
+  // Phase-1-only tenants get the existing input shape with empty scores.
+  const [hcoTierRows, hcpTierRows, hcpScores] = await Promise.all([
     allHcoKeys.length > 0
       ? queryFabric<{ hco_key: string; tier: string | null }>(
           tenantId,
@@ -331,12 +352,16 @@ async function gatherRecommendationInputs(
              AND hcp_key IN (${escIn(allHcpKeys)})`,
         )
       : Promise.resolve([]),
+    loadHcpTargetScoresByKeys({ tenantId, hcpKeys: allHcpKeys }),
   ]);
   const hcoTierByKey = new Map(hcoTierRows.map((r) => [r.hco_key, r.tier]));
   const hcpTierByKey = new Map(hcpTierRows.map((r) => [r.hcp_key, r.tier]));
+  const hcpScoreByKey = new Map(hcpScores.map((s) => [s.hcp_key, s]));
   const hcoTier = (k: string | null): string | null =>
     k ? (hcoTierByKey.get(k) ?? null) : null;
   const hcpTier = (k: string): string | null => hcpTierByKey.get(k) ?? null;
+  const hcpScore = (k: string): number | null =>
+    hcpScoreByKey.get(k)?.score_value ?? null;
 
   return {
     rep: {
@@ -352,6 +377,11 @@ async function gatherRecommendationInputs(
         specialty: h.specialty,
         tier: hcpTier(h.hcp_key),
         calls: h.calls,
+        // Composite target score (0-100, NULL when no scoring data).
+        // Lets the LLM reason about whether the rep is spending calls
+        // on high-value HCPs ("top-called HCP scored only 12 of 100;
+        // probably worth shifting attention").
+        target_score: hcpScore(h.hcp_key),
       })),
     },
     coverage_hcos: coverage.slice(0, 20).map((c) => ({
@@ -401,12 +431,33 @@ async function gatherRecommendationInputs(
       last_call_date: u.last_call_date,
       never_called: u.last_call_date == null,
     })),
-    // ----- Future plug-in points (per project_llm_input_extensibility) -----
-    // These fields stay empty until the underlying gold tables exist;
-    // the prompt is instructed to ignore empty fields. Adding an ML
-    // surface = populating one of these arrays via its own loader.
+    // ----- Plug-in points (per project_llm_input_extensibility) -----
+    // hcp_target_scores: Phase 2 SHIPPED. Populated when the tenant has
+    //   active attribute mappings + the silver/gold attribute pipeline
+    //   has run. Empty otherwise (gracefully degrades).
+    // hco_potential / forecasts / call_intelligence: still placeholders.
+    // Adding a future analytical surface = populating one of these
+    // arrays via its own loader; no LLM-side rewrite needed.
     predictions: {
-      hcp_target_scores: [], // gold.hcp_target_score
+      hcp_target_scores: topScoringUncalled.map((h) => ({
+        hcp_key: h.hcp_key,
+        name: h.name,
+        specialty: h.specialty,
+        primary_parent_hco_name: h.primary_parent_hco_name,
+        tier: h.tier,
+        score_value: h.score_value,
+        contributor_count: h.contributor_count,
+        // Top contributors (attribute name + raw value + normalized 0-100)
+        // give the LLM material for specific reasoning ("top-decile
+        // cisplatin volume + tier 1, no calls in 12 weeks").
+        top_contributors: h.contributors.slice(0, 3).map((c) => ({
+          attribute_name: c.attribute_name,
+          raw_value: c.raw_value,
+          normalized: c.normalized,
+        })),
+        last_call_date: h.last_call_date,
+        never_called: h.never_called,
+      })),
       hco_potential: [], // gold.hco_potential_score
     },
     forecasts: {
@@ -428,6 +479,7 @@ type RecommendationInputs = {
       specialty: string | null;
       tier: string | null;
       calls: number;
+      target_score: number | null;
     }[];
   };
   coverage_hcos: {
@@ -471,7 +523,22 @@ type RecommendationInputs = {
     never_called: boolean;
   }[];
   predictions: {
-    hcp_target_scores: unknown[];
+    hcp_target_scores: {
+      hcp_key: string;
+      name: string;
+      specialty: string | null;
+      primary_parent_hco_name: string | null;
+      tier: string | null;
+      score_value: number;
+      contributor_count: number;
+      top_contributors: {
+        attribute_name: string;
+        raw_value: string;
+        normalized: number;
+      }[];
+      last_call_date: string | null;
+      never_called: boolean;
+    }[];
     hco_potential: unknown[];
   };
   forecasts: {
@@ -500,12 +567,12 @@ A Tier 1 entity with a moderate gap/decline is MORE actionable than a Tier 2 ent
 Within the same priority category (declining, watch-list, etc.), pick the higher-tier entities first. \
 When tier is missing/null/empty, treat as low-priority unless other signals are very strong.
 - When citing tier in a "reason," include it explicitly ("Tier 1 academic medical center, declining 18%...").
-- Category priority: declining accounts > watch-list re-engagement > underactive coverage (cold or lapsed HCOs the rep covers but hasn't touched in 8+ weeks) > rising accounts to capitalize > coverage HCOs without other signal. \
+- Category priority: declining accounts > watch-list re-engagement > predictions.hcp_target_scores (high-scoring HCPs in coverage with no recent calls — third-party scoring data shows these are the right targets) > underactive coverage (cold or lapsed HCOs the rep covers but hasn't touched in 8+ weeks) > rising accounts to capitalize > coverage HCOs without other signal. \
 But TIER overrides category — a Tier 1 underactive coverage HCO beats a Tier 3 declining account.
 - For "underactive_coverage" items: when "never_called" is true, the reason should highlight that the rep has explicit coverage but zero engagement. When false, cite the last_call_date as the gap.
+- For "predictions.hcp_target_scores" items: these are HCPs in the rep's coverage with HIGH composite target scores (0-100) from third-party data (Komodo procedure volumes, Clarivate counts, etc.) but ZERO recent calls. The score_value + top_contributors give you the "why this matters" context. Cite a specific contributor when reasoning ("Top-decile cisplatin volume but no calls in 12 weeks"). Treat score_value >= 80 as high-priority regardless of tier.
 - Avoid recommending an HCP that's in the top_5_called_hcps list — they're already engaged.
-- If a future-input field (predictions, forecasts, call_intelligence) is non-empty, \
-weight it appropriately. If it's empty, ignore it.
+- If a future-input field (forecasts, call_intelligence) is non-empty, weight it appropriately. If it's empty, ignore it.
 - Severity "high" = urgent (lost customer, big drop), "medium" = important (slowdown, gap), \
 "low" = opportunity (rising, untouched).
 
