@@ -433,6 +433,141 @@ export async function loadTierCoverage(
 }
 
 // ---------------------------------------------------------------------------
+// Per-(rep × tier) coverage breakdown. For each rep visible to the
+// caller, computes "of the HCPs in this rep's coverage territories,
+// how many did THIS REP call in the period, by tier."
+//
+// Universe per rep = HCPs in any territory the rep is assigned to via
+// silver.user_territory (NOT just primary). Contacted per rep =
+// distinct HCPs the rep themselves called in the window. So a SAM
+// covering 5 territories sees a large universe; a focused-territory
+// rep sees a smaller one.
+//
+// Returns one row per (rep_user_key, tier). Multi-tenant safe via
+// tenant_id everywhere.
+//
+// Visibility (`viewerScope`):
+//   admin / bypass — all active sales/medical reps
+//   manager — only reps in their userKeys
+//   rep — only themselves (returns 1 rep × N tiers, useful for self-check)
+// ---------------------------------------------------------------------------
+
+export type TierCoverageByRepRow = {
+  rep_user_key: string;
+  rep_name: string;
+  rep_title: string | null;
+  tier: string;
+  total_hcps: number;
+  contacted: number;
+  no_activity: number;
+  pct_contacted: number;
+};
+
+export async function loadTierCoverageByRep(
+  tenantId: string,
+  filters: DashboardFilters,
+  accessibleTerritoryKeys: string[],
+  viewerScope: import("@/lib/scope").UserScope,
+): Promise<TierCoverageByRepRow[]> {
+  if (accessibleTerritoryKeys.length === 0) return [];
+  const dates = rangeDates(filters.range);
+  if (!dates) return [];
+
+  try {
+    const sanitizedTerritories = accessibleTerritoryKeys
+      .map((k) => `'${k.replace(/'/g, "''")}'`)
+      .join(",");
+
+    // Rep visibility filter — narrows the universe to reps the
+    // viewer can see. Same role-based gating as scopeToSql but
+    // applied to dim_user, not fact_call.
+    let repFilter = "";
+    if (viewerScope.role === "rep") {
+      repFilter = `AND u.user_key = '${viewerScope.userKey.replace(/'/g, "''")}'`;
+    } else if (viewerScope.role === "manager") {
+      if (viewerScope.userKeys.length === 0) return [];
+      const userKeyList = viewerScope.userKeys
+        .map((k) => `'${k.replace(/'/g, "''")}'`)
+        .join(",");
+      repFilter = `AND u.user_key IN (${userKeyList})`;
+    }
+
+    const params = mergeParams(filters, NO_SCOPE);
+
+    const rows = await queryFabric<TierCoverageByRepRow>(
+      tenantId,
+      `WITH rep_universe AS (
+         -- For each visible rep, every HCP in any territory they're
+         -- assigned to (via silver.user_territory).
+         SELECT DISTINCT
+           u.user_key AS rep_user_key,
+           u.name AS rep_name,
+           u.title AS rep_title,
+           h.hcp_key,
+           COALESCE(NULLIF(LTRIM(RTRIM(h.tier)), ''), 'Unknown') AS tier
+         FROM gold.dim_user u
+         JOIN silver.user_territory ut
+           ON ut.tenant_id = u.tenant_id
+           AND ut.user_id = u.veeva_user_id
+           AND COALESCE(ut.status, '') IN ('', 'Active', 'active')
+         JOIN gold.dim_territory t
+           ON t.tenant_id = ut.tenant_id
+           AND t.veeva_territory_id = ut.territory_id
+         JOIN gold.bridge_account_territory b
+           ON b.tenant_id = t.tenant_id
+           AND b.territory_key = t.territory_key
+         JOIN gold.dim_hcp h
+           ON h.tenant_id = b.tenant_id
+           AND h.hcp_key = b.account_key
+         WHERE u.tenant_id = @tenantId
+           AND u.status = 'Active'
+           AND u.user_type IN ('Sales', 'Medical')
+           AND h.status = 'Active'
+           AND b.territory_key IN (${sanitizedTerritories})
+           ${repFilter}
+       ),
+       contacted AS (
+         -- Per-rep distinct HCPs called in window. Pairs (rep_user_key,
+         -- hcp_key) so we can join to rep_universe and count "did THIS
+         -- REP call THIS HCP."
+         SELECT DISTINCT
+           f.owner_user_key AS rep_user_key,
+           f.hcp_key
+         FROM gold.fact_call f
+         WHERE f.tenant_id = @tenantId
+           AND f.call_date >= @filterStart
+           AND f.call_date <= @filterEnd
+           AND f.hcp_key IS NOT NULL
+       )
+       SELECT
+         ru.rep_user_key,
+         ru.rep_name,
+         ru.rep_title,
+         ru.tier,
+         COUNT(DISTINCT ru.hcp_key) AS total_hcps,
+         COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN ru.hcp_key END) AS contacted,
+         COUNT(DISTINCT ru.hcp_key)
+           - COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN ru.hcp_key END) AS no_activity,
+         CASE WHEN COUNT(DISTINCT ru.hcp_key) > 0
+           THEN CAST(ROUND(100.0 * COUNT(DISTINCT CASE WHEN c.hcp_key IS NOT NULL THEN ru.hcp_key END)
+                           / COUNT(DISTINCT ru.hcp_key), 0) AS INT)
+           ELSE 0
+         END AS pct_contacted
+       FROM rep_universe ru
+       LEFT JOIN contacted c
+         ON c.rep_user_key = ru.rep_user_key
+         AND c.hcp_key = ru.hcp_key
+       GROUP BY ru.rep_user_key, ru.rep_name, ru.rep_title, ru.tier
+       ORDER BY ru.rep_name, ru.tier`,
+      params,
+    );
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Page-specific scope builders.
 // ---------------------------------------------------------------------------
 

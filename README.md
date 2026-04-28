@@ -42,7 +42,7 @@ Requires Node 20+ and pnpm 9+.
 - **Power BI embed:** app-owns-data via service principal, **Direct Lake** semantic model with `customData`-based RLS (see ARCHITECTURE.md §5 for the cloud-connection binding setup)
 - **Billing:** Stripe (self-serve tiers); enterprise = annual MSA separate
 
-## Build state (snapshot 2026-04-27)
+## Build state (snapshot 2026-04-28, updated end-of-day)
 
 ### Working end-to-end against fennec's real Veeva + sales data
 
@@ -63,35 +63,39 @@ Requires Node 20+ and pnpm 9+.
 - Service-role secret loaded from lakehouse `Files/secrets/pipeline_config.json` (NOT git-synced) using Supabase legacy JWT format.
 
 **Web app (Next.js)**
-- `/dashboard` — KPI cards (Interactions, HCPs/HCOs reached, Active reps, **Net Units** w/ dollars sub-line). Calls trend w/ goal pace overlay. **Sales trend (units-primary)**. **Top HCOs by Units**, **Top reps by Units** (with "Unattributed" pseudo-row), **Top distributors (unmapped)**. Filter bar (range / granularity / channel), MTD/QTD/YTD presets. RLS-scoped throughout.
-- `/reps/[user_key]` — calls KPIs + trend + Top HCPs (existing) + **Net Units card + sales trend + Top HCOs by Units** (new) + **Coverage HCOs** section (multi-visibility, all bridged HCOs with Primary/Co-coverage badges per Option B hybrid model).
+- `/dashboard` — KPI cards (Interactions w/ calls-goal attainment, HCPs/HCOs reached, Active reps, **Net Units** w/ units-goal attainment + dollars sub-line). Calls + sales trends w/ pace overlay (territory-entity goals). **Top HCOs by Units**, **Top reps by Units**, **Top rising / Top declining accounts** (period-over-period), **Watch list** (had-prior-now-zero), **New accounts** (first-ever sale in window), **HCP tier coverage** panel (% contacted by tier within scope), **Team rollup** (manager/admin: per-rep calls + units attainment, sortable, drill-into rep). **"Since your last visit" synopsis card** at top — LLM-generated narration of what changed since the last data refresh (cached per (user × pipeline_run), 4h rate-limit between regenerations, dismissible until next refresh). FilterBar: range / granularity / channel / **Territory** (admin sees all; manager sees team; rep sees own). MTD/QTD/YTD presets. RLS-scoped throughout.
+- `/explore` — generic matrix surface w/ pickers for **Group by + Rows + Metric + Time grain**. Row dims: HCO, HCP, HCO type, **HCO affiliation** (HCP's primary parent HCO), HCP tier, HCP specialty, Channel, Territory. Metrics: Calls, Net Units, Net Dollars. Multi-dim grouping renders bold group headers w/ accurate subtotals + indented sortable leaves. Click any column header to sort (DESC/ASC toggle); Download CSV button serializes the displayed view. URL state encodes every pick — views are bookmarkable.
+- `/ask` — **conversational analytics chat surface**. 8 RLS-scoped tools: `query_top_accounts`, `query_account_motion` (rising/declining/watch), `lookup_entity` (fuzzy HCO/HCP), `lookup_territory` (fuzzy by description or Veeva code), `query_rep_summary` (per-rep KPIs + trend), `query_tier_coverage` (with `breakdown=by_rep` + tier-label substring filter), `query_entity_detail` (per-HCO sales trend / per-HCP call detail), `query_goal_attainment` (single entity OR worst-N ranked). Tool calls visible inline (collapsed pills) for trust/auditability. Conversations don't persist; refresh = new chat. Claude Opus 4.7 with parallel tool use.
+- `/reps/[user_key]` — calls KPIs + trend + Top HCPs (existing) + **Net Units card + sales trend + Top HCOs by Units** + **Coverage HCOs** section (multi-visibility, all bridged HCOs with Primary/Co-coverage badges per Option B hybrid model). **"Suggested this week" LLM card** with 3-5 prioritized HCP/HCO recommendations + per-row "Show context" expand panel (affiliated HCPs at the HCO + sales mini-trend for HCO suggestions; parent HCO + recent calls for HCP suggestions). Cached per (rep × pipeline_run), 4h rate-limit. Tier-aware weighting in the prompt; underactive coverage (HCOs in book with zero calls via affiliated HCPs in last 8 weeks) as a primary input.
 - `/hcps/[hcp_key]` — calls-focused detail (sales rarely attributed at HCP grain in 867 data).
 - `/hcos/[hco_key]` — calls + sales surfaces (units-primary). **Sales attribution** section showing every territory the HCO is bridged to with primary flag, current rep, assignment source. Veeva ID surfaced for cross-reference.
-- `/inbox` — AI-driven signals: HCP inactivity, activity drop, over-targeting, goal pace behind (calls), **unmapped-accounts** (admin-only). LLM priority brief at top.
-- `/admin/goals` — recommendation-driven form. **Calls goals at REP entity** (existing). **Units goals at TERRITORY entity** (new — pharma standard; reps come/go but goal stays with territory). CSV upload + template per metric/entity. Period picker w/ reactive Month/Quarter/Year snap.
+- `/inbox` — AI-driven signals: HCP inactivity, activity drop, over-targeting, goal pace behind (calls + sales — territory-entity), **unmapped-accounts** (admin-only). LLM priority brief at top.
+- `/admin/goals` — recommendation-driven form. **Calls goals at REP entity**. **Units goals at TERRITORY entity** (pharma standard; reps come/go but goal stays with territory). Territory display shows description (geographic) over Veeva code. CSV upload + template per metric/entity (territory CSV emits both description + name columns; upload accepts either). Period picker w/ reactive Month/Quarter/Year snap.
 - `/admin/mappings` — Smart CSV uploader (column mapper + preview + auto-detect synonyms), multi-field resolution (veeva_account_id / network_id / npi / dea_number / aha_id), per-row picker w/ HCO-only fuzzy suggestions (Jaro-Winkler), saved-mappings list with inline edit/delete + search, "Run sync now" button triggers `mapping_propagate_pipeline`. Postgres-authoritative for "Needs mapping".
 - `/admin/users` — Invite flow with "Invite from Veeva" + manual escape hatch.
 - `/admin/tenants` — tenant CRUD.
 - `/admin/pipelines` — pipeline health monitor (last run + status per kind, recent runs table with expandable step_metrics + error JSON).
-- **RLS:** per-user role + scope (`admin` / `manager` / `rep` / `bypass`), enforced at query layer in `apps/web/lib/scope.ts`. **Sales loaders rewrite `owner_user_key` → `rep_user_key` for fact_sale RLS.**
+- `/admin/attributes` — Phase 1 of the tenant-custom HCP/HCO scoring attributes architecture. Admin UI to declare which bronze columns are scoring attributes (Komodo deciles, Clarivate volumes, IQVIA Rx, etc.) — cascading dropdowns: source system → bronze table (introspected from tenant's bronze schema via `INFORMATION_SCHEMA`) → bronze column (lazy-fetched on table select) → auto-suggested canonical attribute name. Saves to `tenant_attribute_map` Postgres table. Phase 2 (silver/gold notebooks + LLM input wiring) not yet built — spec at `docs/architecture/tenant-custom-attributes.md`.
+- **RLS:** per-user role + scope (`admin` / `manager` / `rep` / `bypass`), enforced at query layer in `apps/web/lib/scope.ts`. **Sales loaders rewrite `owner_user_key` → `rep_user_key` for fact_sale RLS.** **Calls territory filter** uses HCP-in-territory via `bridge_account_territory` (current-state; SCD2 deferred per `project_owner_temporal_scd2_followup`).
 - **Auth + provisioning:** Clerk middleware-protected; `/api/webhooks/clerk` provisions `tenant_user`.
 
 ### Not yet wired (current pending list)
 
-- **Sales goals surfacing** — territory-entity entry ships; pace overlay on Net Units card / sales trend, /reps "effective goal" attainment, /inbox sales-pace signal all queued for next session.
-- **Territory display polish** — render `description` (geographic, "Los Angeles") as primary label, code (`C103`) as subtitle. Apply to goals form + coverage views + attribution chain.
+- **HCO affiliation on /explore picker** — code shipped; needs silver_hcp + gold_dim_hcp rebuild + field-map re-seed to populate `primary_parent_hco_key`/`name` on `dim_hcp`. Picker entry will return empty until then.
 - **Pipeline-as-DataPipeline** — `.DataPipeline` git-synced items would let schedules live in code (vs hand-set per Fabric workspace). Notebook orchestrators work today; this is a polish migration.
 - **Per-tenant rules registry** — TEAM_ROLE_RULES, ELIGIBLE_REP_TYPES, etc. hardcoded per tenant in notebook constants. End state: editable from /admin. Refactor when tenant #2 lands. (See `project_tenant_specific_rules_registry` memory.)
 - **Mapping kinds beyond account_xref** — schema supports product/territory/hco_channel/customer_type. UI only handles account_xref today.
-- `silver.user_territory_assignment_scd2` for point-in-time attribution (current is current-state only — see SCD2 limitation noted on Phase A surfaces).
-- `gold.bridge_hcp_hco` (HCP↔HCO affiliations) — high-value once we add prescribing data.
+- **Owner-temporal SCD2 territory attribution** — current model is HCP-in-territory current-state. Fennec's stricter end-state (call pinned to rep's territory at call time) is the eventual fix. See `project_owner_temporal_scd2_followup` memory + `docs/product/matrix-tables.md`.
+- `gold.fact_call.hco_key` — missing; calls territory filter approximates via HCP affiliation. HCO-type-by-Calls in /explore is disabled until this lands.
 - Mislabeled `gold.fact_call.status` column — always "Active" (account-flag carry-through).
 - Tests. Architecture §9.9 calls for them; we have zero.
 - `user.deleted` Clerk webhook handler for offboarding.
 
 ### Immediate next milestone
 
-**Phase B surfacing — sales goals on the dashboard.** Net Units KPI card → attainment label when a tenant-wide units goal exists. Sales trend → dashed pace ReferenceLine. /reps page → "effective goal" = sum of territories where rep is current_rep, with attainment + pace overlay. /inbox → "Behind on sales pace" signal (mirrors loadGoalPaceSignals for calls).
+**LLM expansion v1 SHIPPED.** All three surfaces from `docs/product/llm-expansion.md` are live: synopsis (`/dashboard`), action recommendations (`/reps/[user_key]`), conversational analytics (`/ask`). Each uses the narrator-over-input pattern (LLM never invents — every fact comes from a tool result), per-(entity × pipeline_run) caching with 4h rate-limit, and tenant + role isolation enforced at the loader layer.
+
+**Next major lift:** tenant-custom HCP/HCO attributes Phase 2 (silver_hcp_attribute_build + silver_hco_attribute_build notebooks, gold rollup tables, composite `gold.hcp_target_score`, LLM input wiring via the existing `predictions.hcp_target_scores` placeholder field on rep-recommendations input). Phase 1 (schema + admin UI + migration) is live 2026-04-28; admins can configure mappings now but they sit inert until Phase 2 builds the ingestion. Spec at `docs/architecture/tenant-custom-attributes.md`. Until Phase 2 lands, action recommendations on `/reps/[user_key]` lean on coverage + motion signals only.
 
 ## Still open
 

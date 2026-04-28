@@ -8,6 +8,7 @@ const MAIN_LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { href: "/inbox", label: "Inbox", icon: "inbox" },
   { href: "/explore", label: "Explore", icon: "explore" },
+  { href: "/ask", label: "Ask", icon: "sparkles" },
   { href: "/reports", label: "Reports", icon: "reports" },
   { href: "/admin/tenants", label: "Admin", icon: "admin" },
   { href: "/settings", label: "Settings", icon: "settings" },

@@ -26,6 +26,12 @@ import {
   attainmentLabel,
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
+import RepRecommendationsCard from "@/components/rep-recommendations-card";
+import {
+  loadRepRecommendations,
+  loadRecommendationContexts,
+  type RecommendationContext,
+} from "@/lib/rep-recommendations";
 import TrendChart from "../../dashboard/trend-chart";
 import FilterBar from "../../dashboard/filter-bar";
 import AccountToggle from "../../dashboard/account-toggle";
@@ -103,6 +109,41 @@ function formatCompactDollars(n: number): string {
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type RouteParams = Promise<{ user_key: string }>;
 
+// Loads contexts for each recommendation in parallel, then renders the
+// card with both items + contexts. Wrapped in its own server component
+// so the dashboard's Promise.all doesn't have to wait for context
+// queries — they fire only after recommendations land. Map → plain
+// object for client-component serialization.
+async function RecommendationsWithContext({
+  tenantId,
+  repUserKey,
+  items,
+  generatedAt,
+  repFirstName,
+}: {
+  tenantId: string;
+  repUserKey: string;
+  items: import("@/lib/rep-recommendations").RepRecommendationItem[];
+  generatedAt: Date;
+  repFirstName: string;
+}) {
+  const ctxMap = await loadRecommendationContexts({
+    tenantId,
+    repUserKey,
+    items: items.map((i) => ({ kind: i.kind, key: i.key })),
+  });
+  const contextByItemKey: Record<string, RecommendationContext> = {};
+  for (const [k, v] of ctxMap.entries()) contextByItemKey[k] = v;
+  return (
+    <RepRecommendationsCard
+      items={items}
+      contextByItemKey={contextByItemKey}
+      generatedAt={generatedAt}
+      repFirstName={repFirstName}
+    />
+  );
+}
+
 export default async function RepDetail({
   params,
   searchParams,
@@ -156,6 +197,7 @@ export default async function RepDetail({
     repSalesTrend,
     repTopHcosBySales,
     repCoverageHcos,
+    recommendations,
   ] = await Promise.all([
       loadInteractionKpis(tenantId, filters, sqlScope),
       loadTrend(tenantId, filters, sqlScope),
@@ -178,6 +220,10 @@ export default async function RepDetail({
       // Coverage list is current-state, not date-filtered. Cap at 200
       // for now; if reps cover hundreds we'll add a search/pagination.
       loadRepCoverageHcos(tenantId, user_key, 200),
+      // LLM-generated "Suggested this week" — cached per (rep,
+      // pipeline_run) with a 4h generation rate-limit. Same
+      // narrator-over-input pattern as the dashboard synopsis.
+      loadRepRecommendations({ tenantId, repUserKey: user_key }),
     ]);
 
   const hasSalesHistory =
@@ -301,6 +347,16 @@ export default async function RepDetail({
           ))}
         </div>
       </div>
+
+      {recommendations.kind === "show" ? (
+        <RecommendationsWithContext
+          tenantId={tenantId}
+          repUserKey={user_key}
+          items={recommendations.items}
+          generatedAt={recommendations.generatedAt}
+          repFirstName={rep.name.split(" ")[0] ?? rep.name}
+        />
+      ) : null}
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">

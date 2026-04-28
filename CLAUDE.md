@@ -38,7 +38,7 @@ Bronze → silver → gold all built and tested against fennec's live Veeva data
 - PBI embed demoted to `/reports/[id]` for deep self-service analysis only
 - Per-feed snapshot/incremental cadence config (`tenant_sftp_feed`) drives silver build batch-selection
 
-**See README.md "Build state" section** for specifics + the immediate-next-milestone (Phase B sales-goals surfacing).
+**See README.md "Build state" section** for specifics + the immediate-next-milestone (currently: tenant-custom HCP/HCO scoring attributes — third-party Komodo/Clarivate/IQVIA data spec at `docs/architecture/tenant-custom-attributes.md`).
 
 ## Architectural patterns we settled on
 - **Postgres = canonical for admin-edited state** (goals, mappings, tenant_user, tenant config, pipeline_run). Web app interactive reads go to Postgres.
@@ -51,6 +51,11 @@ Bronze → silver → gold all built and tested against fennec's live Veeva data
 - **Sales goals at TERRITORY entity, calls goals at REP entity.** Pharma standard — territories are stable units of market potential; reps come/go but the goal stays. Rep "effective goal" = sum of territories where they're current rep.
 - **Unmapped + unattributed sales must always be visible.** Aggregate SUMs include them; breakdowns surface as "Unmapped" / "Unattributed" pseudo-rows. Never silently drop fact_sale rows. (See `project_unmapped_sales_visibility` memory.)
 - **Per-tenant rules as hardcoded notebook constants** today (TEAM_ROLE_RULES, ELIGIBLE_REP_TYPES). Tracked debt; refactor to per-tenant config table when tenant #2 lands.
+- **LLM is a narrator, never a knowledge source.** Every LLM-driven surface (synopsis, rec card, /ask) gets structured input from existing loaders + narrates over it. Never invents — if data isn't in the input, it doesn't appear in the output. Each call cached per (entity × pipeline_run) with 4h rate-limit so repeat page loads + frequent prod refreshes don't burn LLM cost. See `project_llm_input_extensibility` + `docs/product/llm-expansion.md`.
+- **Tool-use chat pattern (`/ask`):** lookup tools (`lookup_entity`, `lookup_territory`) resolve names → keys, then data tools take keys. Multi-step LLM calls compose. Tool calls visible in UI as collapsed pills for trust/auditability. Tenant + role isolation enforced at LOADER layer (belt + suspenders — never trust the LLM with scope).
+- **Return raw shape, let the LLM filter** when tenant data formats vary (e.g., tier values are "1" vs "Tier 1" vs "T1" depending on Veeva picklist). Tools return all rows; LLM picks the relevant ones from inspection rather than hard-coded format guesses in the tool.
+- **Veeva is the source of truth for calls** — never build parallel UI state-tracking that could diverge. Reps log activity in Veeva → our incremental sync picks it up. UI action buttons help reps EXECUTE on suggestions (open Veeva, generate prep brief), not check off completed items. See `project_rep_action_paradigm` memory.
+- **Client component import gotcha:** if a client component (`"use client"`) imports from a `lib/*.ts` file that ALSO contains server-only helpers (anything using `mssql`/`tedious`/`queryFabric`, or anything that pulls in Node-only modules like `dgram`), Next.js bundles ALL of that file into the browser bundle and the build fails. Fix: split pure helpers (used by both server + client) into their own file, OR inline the helper into the client component. Comment in `lib/bronze-introspection.ts` flags the pattern.
 
 ## Orientation for new sessions
 Read these in order:

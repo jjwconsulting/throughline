@@ -27,6 +27,8 @@ import {
   attainmentLabel,
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
+import SynopsisCard from "@/components/synopsis-card";
+import { loadDashboardSynopsis } from "@/lib/synopsis";
 import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
 import AccountToggle from "./account-toggle";
@@ -190,6 +192,7 @@ export default async function Dashboard({
     newAccounts,
     tierCoverage,
     teamRollup,
+    synopsis,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, rlsScope),
     loadTrend(tenantId, filters, rlsScope),
@@ -220,6 +223,11 @@ export default async function Dashboard({
     loadNewAccounts(tenantId, filters, 10, rlsScope),
     loadTierCoverage(tenantId, filters, accessibleTerritoryKeys, rlsScope),
     loadTeamRollup(tenantId, scope, filters),
+    // Synopsis is naturally low-frequency: cached per (user × pipeline_run)
+    // so repeated dashboard loads against the same data refresh hit
+    // cache + skip the LLM call. Returns hide={no_run|dismissed|no_changes|...}
+    // when the card shouldn't render.
+    loadDashboardSynopsis({ userScope: scope, userEmail, sqlScope: rlsScope }),
   ]);
 
   const period = periodLabel(filters.range);
@@ -300,6 +308,13 @@ export default async function Dashboard({
         </div>
         <FilterBar filters={filters} territories={accessibleTerritories} />
       </div>
+
+      {synopsis.kind === "show" ? (
+        <SynopsisCard
+          body={synopsis.body}
+          generatedAt={synopsis.generatedAt}
+        />
+      ) : null}
 
       <div className="space-y-3">
         <AccountToggle value={filters.account} />

@@ -45,6 +45,27 @@ export const mappingKindEnum = pgEnum("mapping_kind", [
   "account_xref",
 ]);
 
+// Entity an attribute belongs to. Drives whether a tenant_attribute_map
+// row's silver-side data lands in silver.hcp_attribute vs silver.hco_attribute.
+// See `project_tenant_custom_attributes` memory + docs/architecture/
+// tenant-custom-attributes.md.
+export const attributeEntityTypeEnum = pgEnum("attribute_entity_type", [
+  "hcp",
+  "hco",
+]);
+
+// Semantic shape of an attribute value. Informs gold-layer parsing
+// (decile/score/percentile → numeric; categorical/flag → string) and
+// downstream consumption (LLM prompt context, ranking math).
+export const attributeTypeEnum = pgEnum("attribute_type", [
+  "decile",
+  "score",
+  "volume",
+  "percentile",
+  "categorical",
+  "flag",
+]);
+
 export const tenantUserRoleEnum = pgEnum("tenant_user_role", [
   "admin",
   "manager",
@@ -345,6 +366,15 @@ export const tenantUser = pgTable(
     // single Veeva rep. See docs/architecture/rls.md.
     veevaUserKey: text("veeva_user_key"),
     effectiveTerritoryIds: text("effective_territory_ids").array(),
+    // When the user last dismissed the /dashboard "Since you last
+    // logged in" synopsis card. Drives whether to show the card on
+    // the next page load: if this timestamp >= the latest successful
+    // pipeline_run.finished_at for the tenant, hide the card (they've
+    // already seen + dismissed the synopsis for the current data
+    // refresh). Null = never dismissed → show on first eligible visit.
+    lastDismissedSynopsisAt: timestamp("last_dismissed_synopsis_at", {
+      withTimezone: true,
+    }),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -355,6 +385,139 @@ export const tenantUser = pgTable(
       "tenant_user_rep_needs_user_key",
       sql`${t.role} <> 'rep' OR ${t.veevaUserKey} IS NOT NULL`,
     ),
+  }),
+);
+
+// Tenant-custom HCP/HCO attribute mapping. Declares which bronze
+// fields are "attributes" (per-HCP/HCO scoring data — Komodo deciles,
+// Clarivate volumes, etc.) and their semantic shape. Read by
+// silver_hcp_attribute_build / silver_hco_attribute_build to pivot
+// bronze columns into silver.hcp_attribute / silver.hco_attribute
+// long-format Delta tables.
+//
+// Two ingestion paths supported via source_system + bronze_table:
+//   - 'veeva' + 'veeva_obj_account__v' → tenant loaded scoring into
+//     Veeva account custom fields (e.g., fennec/Komodo)
+//   - 'sftp' + 'sftp_<feed_name>' → standalone CSV/file delivery
+//     (e.g., Clarivate direct)
+//
+// Phase 1 ships this config table + admin UI. Phase 2 adds the
+// silver/gold notebooks. Phase 3 wires LLM input via the existing
+// `predictions` placeholder field on rep-recommendations input
+// (per project_llm_input_extensibility memory).
+//
+// Spec: docs/architecture/tenant-custom-attributes.md.
+export const tenantAttributeMap = pgTable(
+  "tenant_attribute_map",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    sourceSystem: sourceSystemEnum("source_system").notNull(),
+    // Bronze-side reference: which bronze table holds this column.
+    // Veeva path: 'veeva_obj_account__v'. SFTP path: e.g.
+    // 'sftp_komodo_2024'. The downstream silver build resolves the
+    // physical table name via the tenant's bronze schema prefix.
+    bronzeTable: text("bronze_table").notNull(),
+    bronzeColumn: text("bronze_column").notNull(),
+    // Canonical name in our attribute space (admin's choice during
+    // setup). Tenants can share canonical names where it makes sense
+    // (e.g., 'breast_cancer_decile') so analytics + LLM prompts can
+    // reference them stably.
+    attributeName: text("attribute_name").notNull(),
+    entityType: attributeEntityTypeEnum("entity_type").notNull(),
+    attributeType: attributeTypeEnum("attribute_type").notNull(),
+    // Source attribution — visible in reports + LLM prompts +
+    // audit. e.g. 'komodo_2024_q4', 'clarivate_2024_jan'.
+    sourceLabel: text("source_label").notNull(),
+    // Optional therapy-area / product / scope tag for analytics
+    // grouping. Lets the gold layer + LLM filter by therapy area.
+    scopeTag: text("scope_tag"),
+    active: boolean("active").notNull().default(true),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: text("updated_by").notNull(),
+  },
+  (t) => ({
+    // One mapping per (tenant, bronze location). Re-saving the same
+    // bronze column for a different attribute_name = update, not
+    // duplicate — admins fix typos by re-mapping.
+    uniqBronzeLocation: unique(
+      "tenant_attribute_map_bronze_location_uniq",
+    ).on(t.tenantId, t.sourceSystem, t.bronzeTable, t.bronzeColumn),
+  }),
+);
+
+// Per-(rep × pipeline_run) cache of the LLM-generated "Suggested
+// this week" recommendations on /reps/[user_key]. Cache key keyed
+// on the REP being viewed (not the viewer), so manager + admin +
+// the rep themselves all see the same recommendations for the
+// same rep at the same data snapshot. Body is JSON-stringified
+// list of `{ kind, key, label, reason }`.
+export const repRecommendationCache = pgTable(
+  "rep_recommendation_cache",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    // The rep these recommendations are FOR (dim_user.user_key).
+    // Plain text since dim_user lives in Fabric, not Postgres.
+    repUserKey: text("rep_user_key").notNull(),
+    pipelineRunId: uuid("pipeline_run_id")
+      .notNull()
+      .references(() => pipelineRun.id, { onDelete: "cascade" }),
+    // JSON-stringified list: [{ kind: 'hcp'|'hco', key, label,
+    // reason, severity? }].
+    body: text("body").notNull(),
+    // JSON snapshot of LLM input — debugging + prompt iteration.
+    inputSnapshot: text("input_snapshot"),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [t.tenantId, t.repUserKey, t.pipelineRunId],
+    }),
+  }),
+);
+
+// Per-(user × pipeline_run) cache of the LLM-generated dashboard
+// synopsis. Cache key includes pipeline_run_id so a fresh data
+// refresh forces a recompute; multiple page loads against the same
+// data refresh hit cache and skip the LLM call entirely.
+//
+// One row per (tenant, user, pipeline_run) — typically 1-2 rows per
+// user per day. Old rows naturally age out as pipeline_run cascades
+// delete (or via a future cron).
+export const synopsisCache = pgTable(
+  "synopsis_cache",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    userEmail: text("user_email").notNull(),
+    pipelineRunId: uuid("pipeline_run_id")
+      .notNull()
+      .references(() => pipelineRun.id, { onDelete: "cascade" }),
+    // The LLM-generated narration. Plain text — we render as a
+    // single paragraph in the UI; bullets / structure can be added
+    // later if usage shows it's needed.
+    body: text("body").notNull(),
+    // JSON snapshot of what we sent the LLM (top movers, signals,
+    // attainment shifts). Useful for prompt iteration + debugging
+    // bad outputs without re-running the loaders.
+    inputSnapshot: text("input_snapshot"),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [t.tenantId, t.userEmail, t.pipelineRunId],
+    }),
   }),
 );
 

@@ -8,6 +8,7 @@ const ADMIN_LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/admin/tenants", label: "Tenants", icon: "tenants" },
   { href: "/admin/users", label: "Users", icon: "users" },
   { href: "/admin/mappings", label: "Mappings", icon: "mappings" },
+  { href: "/admin/attributes", label: "Attributes", icon: "sparkles" },
   { href: "/admin/goals", label: "Goals", icon: "goals" },
   { href: "/admin/pipelines", label: "Pipelines", icon: "pipelines" },
 ];
