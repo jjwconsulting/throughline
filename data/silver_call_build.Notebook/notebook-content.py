@@ -53,6 +53,12 @@ MAPPED_COLUMNS = [
     "call_type", "call_channel", "call_status", "status",
     "signature_status", "check_in_status",
     "is_sampled_call", "is_remote_meeting",
+    # Drop-off visit flag (fennec custom). True = rep dropped materials at
+    # reception without seeing the HCP; False/NULL = live engagement.
+    # Critical fennec dimension — without this split, "calls" metrics
+    # conflate quick logistical drop-offs with real engagement. See
+    # fennec's `drop_off_visit__c` in their Fact_Calls notebook.
+    "drop_off_visit",
     # Where
     "city", "state", "postal_code", "location",
     # Notes
@@ -121,6 +127,7 @@ CREATE TABLE IF NOT EXISTS {SILVER_TABLE} (
   check_in_status        STRING,
   is_sampled_call        STRING,
   is_remote_meeting      STRING,
+  drop_off_visit         STRING,
   city                   STRING,
   state                  STRING,
   postal_code            STRING,

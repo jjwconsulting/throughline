@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   status                  STRING,
   is_remote_meeting       STRING,
   is_sampled_call         STRING,
+  -- Drop-off visit flag (fennec custom). 'true' = rep dropped materials
+  -- without seeing the HCP. Critical engagement-quality dimension —
+  -- splits "real engagement" from logistical touches. NULL when source
+  -- doesn't capture this (non-fennec tenants).
+  drop_off_visit          STRING,
   duration_minutes        DOUBLE,
   call_count              INT       NOT NULL,
   city                    STRING,
@@ -78,6 +83,16 @@ CREATE TABLE IF NOT EXISTS {GOLD_TABLE} (
   product_priority_3      STRING,
   materials_used          STRING,
   msl_materials_used      STRING,
+  -- Qualitative call notes (rep-written context). Often empty for
+  -- fennec (post-call note discipline varies by tenant). When
+  -- populated they're the highest-signal input for LLM call briefs +
+  -- "what did we discuss last time" surfaces. Promoted to gold so
+  -- downstream consumers can use them without joining back to silver.
+  comments                STRING,
+  notes                   STRING,
+  pre_call_notes          STRING,
+  next_call_notes         STRING,
+  subject                 STRING,
   source_system           STRING    NOT NULL,
   gold_built_at           TIMESTAMP NOT NULL
 ) USING DELTA
@@ -120,6 +135,7 @@ SELECT
   c.status,
   c.is_remote_meeting,
   c.is_sampled_call,
+  c.drop_off_visit,
   TRY_CAST(c.duration AS DOUBLE)           AS duration_minutes,
   1                                        AS call_count,
   c.city,
@@ -130,6 +146,11 @@ SELECT
   c.product_priority_3,
   c.materials_used,
   c.msl_materials_used,
+  c.comments,
+  c.notes,
+  c.pre_call_notes,
+  c.next_call_notes,
+  c.subject,
   c.source_system,
   current_timestamp()                      AS gold_built_at
 FROM silver.call c

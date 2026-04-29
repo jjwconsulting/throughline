@@ -12,7 +12,12 @@ import {
   loadHcoSalesTrend,
   loadHcoTopProducts,
 } from "@/lib/sales";
+import { loadTopScoringAffiliatedHcps } from "@/lib/hcp-target-scores";
 import { getCurrentScope, scopeToSql, combineScopes } from "@/lib/scope";
+import { db } from "@/lib/db";
+import { eq, schema } from "@throughline/db";
+import { veevaAccountUrl } from "@/lib/veeva-url";
+import AffiliatedHcpScoresCard from "@/components/affiliated-hcp-scores-card";
 import {
   filterClauses,
   filtersToParams,
@@ -136,7 +141,7 @@ async function loadHcoCallingReps(
   filters: DashboardFilters,
   scope: Scope,
 ): Promise<CallingRep[]> {
-  const { dateFilter, channelFilter } = filterClauses(filters);
+  const { dateFilter, channelFilter, callKindFilter } = filterClauses(filters);
   return queryFabric<CallingRep>(
     tenantId,
     `SELECT TOP 10 u.user_key, u.name, u.title,
@@ -145,7 +150,7 @@ async function loadHcoCallingReps(
      FROM gold.fact_call f
      JOIN gold.dim_user u ON u.user_key = f.owner_user_key AND u.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${scope.clauses.join(" ")}
+       ${dateFilter} ${channelFilter} ${callKindFilter} ${scope.clauses.join(" ")}
      GROUP BY u.user_key, u.name, u.title
      ORDER BY calls DESC`,
     { ...filtersToParams(filters), ...scope.params },
@@ -225,6 +230,8 @@ export default async function HcoDetail({
     salesTrend,
     topProducts,
     attributionChain,
+    affiliatedScores,
+    tenantVeevaRows,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, sqlScope),
     loadTrend(tenantId, filters, sqlScope),
@@ -233,7 +240,21 @@ export default async function HcoDetail({
     loadHcoSalesTrend(tenantId, hco_key, filters, userSqlScope),
     loadHcoTopProducts(tenantId, hco_key, filters, 10, userSqlScope),
     loadHcoAttributionChain(tenantId, hco_key),
+    // Top affiliated HCPs at this HCO ranked by composite targeting
+    // score. Surfaces "high-value physicians practicing here."
+    loadTopScoringAffiliatedHcps({ tenantId, hcoKey: hco_key, limit: 10 }),
+    // Vault domain for the Veeva deep link (existing veeva_account_id
+    // is already on `hco`).
+    db
+      .select({ vaultDomain: schema.tenantVeeva.vaultDomain })
+      .from(schema.tenantVeeva)
+      .where(eq(schema.tenantVeeva.tenantId, tenantId))
+      .limit(1),
   ]);
+  const veevaUrl = veevaAccountUrl(
+    tenantVeevaRows[0]?.vaultDomain ?? null,
+    hco.veeva_account_id,
+  );
 
   // Show the sales-related surfaces only when this HCO actually has sales
   // history. New tenants (or HCOs that have never been a ship-to) get the
@@ -332,7 +353,29 @@ export default async function HcoDetail({
               </div>
             ) : null}
           </div>
-          <FilterBar filters={filters} />
+          <div className="flex items-center gap-3">
+            {veevaUrl ? (
+              <a
+                href={veevaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs rounded-md px-3 py-1.5 bg-[var(--color-primary)] text-white hover:opacity-90"
+              >
+                Open in Veeva
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="h-3 w-3"
+                  aria-hidden="true"
+                >
+                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                </svg>
+              </a>
+            ) : null}
+            <FilterBar filters={filters} />
+          </div>
         </div>
       </div>
 
@@ -373,6 +416,11 @@ export default async function HcoDetail({
           <TrendChart data={trend} />
         </div>
       </div>
+
+      <AffiliatedHcpScoresCard
+        hcos={affiliatedScores}
+        hcoName={hco.name}
+      />
 
       {hasSalesHistory ? (
         <>

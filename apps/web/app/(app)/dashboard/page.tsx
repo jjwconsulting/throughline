@@ -244,12 +244,27 @@ export default async function Dashboard({
   // For the interactions card, prefer attainment as the secondary line when
   // a goal exists for this period; fall back to vs-prior delta otherwise.
   // Goals are the more decision-useful signal when they exist.
-  const interactionsSecondary =
+  const interactionsPrimary =
     periodGoal != null && periodGoal > 0
       ? attainmentLabel(kpis.calls_period, periodGoal).label
       : filters.range === "all"
         ? null
         : deltaLabel(kpis.calls_period, kpis.calls_prior);
+  // Live-vs-dropoff split — surfaces what fraction of "calls" are real
+  // engagement vs logistical drop-offs. Only renders when (a) the
+  // tenant captures drop_off_visit (any non-zero dropoff count), AND
+  // (b) the user hasn't already filtered to one side. Treats it as a
+  // secondary-line fact alongside attainment / delta.
+  const hasDropoffData =
+    kpis.dropoff_calls_period > 0 &&
+    filters.callKind === "all";
+  const liveDropoffLine = hasDropoffData
+    ? `${formatNumber(kpis.live_calls_period)} live · ${formatNumber(kpis.dropoff_calls_period)} drop-off`
+    : null;
+  const interactionsSecondary =
+    interactionsPrimary && liveDropoffLine
+      ? `${interactionsPrimary} · ${liveDropoffLine}`
+      : interactionsPrimary ?? liveDropoffLine;
   // Sales card: units headline + dollars sub-line. Reps/managers think
   // in units (vials, doses, treatment cycles); dollars are the
   // finance/exec lens. Both rendered.

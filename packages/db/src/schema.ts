@@ -484,6 +484,51 @@ export const repRecommendationCache = pgTable(
   }),
 );
 
+// Per-(rep × entity × pipeline_run) cache of the LLM-generated call
+// brief. Cache hits when the same rep regenerates the brief for the
+// same HCP/HCO within one pipeline_run cycle — typically a day. New
+// pipeline_run forces fresh generation so updated calls / scoring /
+// motion data flow through. Action-launchpad surface for
+// /reps/[user_key] (Surface C v2 per project_rep_action_paradigm).
+export const callBriefCache = pgTable(
+  "call_brief_cache",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenant.id, { onDelete: "cascade" }),
+    // The rep generating the brief (dim_user.user_key, plain text
+    // since dim_user lives in Fabric).
+    repUserKey: text("rep_user_key").notNull(),
+    // 'hcp' | 'hco' — kind of entity the brief is for.
+    entityKind: text("entity_kind").notNull(),
+    // Surrogate key from gold.dim_hcp.hcp_key / gold.dim_hco.hco_key.
+    entityKey: text("entity_key").notNull(),
+    pipelineRunId: uuid("pipeline_run_id")
+      .notNull()
+      .references(() => pipelineRun.id, { onDelete: "cascade" }),
+    // JSON-stringified brief: { bullets: string[] }. Plain text in
+    // case the LLM later returns richer structures (action items,
+    // citations, etc.) — easier to evolve than a typed column.
+    body: text("body").notNull(),
+    // JSON snapshot of inputs for debugging / prompt iteration.
+    inputSnapshot: text("input_snapshot"),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [
+        t.tenantId,
+        t.repUserKey,
+        t.entityKind,
+        t.entityKey,
+        t.pipelineRunId,
+      ],
+    }),
+  }),
+);
+
 // Per-(user × pipeline_run) cache of the LLM-generated dashboard
 // synopsis. Cache key includes pipeline_run_id so a fresh data
 // refresh forces a recompute; multiple page loads against the same

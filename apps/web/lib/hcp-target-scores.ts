@@ -98,6 +98,132 @@ export async function loadHcpTargetScoresByKeys(args: {
   }
 }
 
+// Load every scope_tag's score for a single HCP, including the synthetic
+// '__all__' composite. Powers the HCP detail page's targeting score card —
+// shows headline composite + per-therapy-area breakdown + top contributors.
+// Returned in score_value DESC order so the highest-impact scopes lead.
+export async function loadAllScoresForHcp(args: {
+  tenantId: string;
+  hcpKey: string;
+}): Promise<HcpTargetScoreRow[]> {
+  const { tenantId, hcpKey } = args;
+  try {
+    const rows = await queryFabric<{
+      hcp_key: string;
+      scope_tag: string;
+      score_value: number;
+      contributor_count: number;
+      contributors: string | null;
+    }>(
+      tenantId,
+      `SELECT hcp_key, scope_tag, score_value, contributor_count, contributors
+       FROM gold.hcp_target_score
+       WHERE tenant_id = @tenantId
+         AND hcp_key = @hcpKey
+       ORDER BY
+         -- '__all__' first as the headline; then by score DESC for the breakdown
+         CASE WHEN scope_tag = '__all__' THEN 0 ELSE 1 END,
+         score_value DESC`,
+      { hcpKey },
+    );
+    return rows.map((r) => ({
+      hcp_key: r.hcp_key,
+      scope_tag: r.scope_tag,
+      score_value: r.score_value,
+      contributor_count: r.contributor_count,
+      contributors: parseContributors(r.contributors),
+    }));
+  } catch (err) {
+    console.error("loadAllScoresForHcp failed:", err);
+    return [];
+  }
+}
+
+export type AffiliatedHcpScore = {
+  hcp_key: string;
+  name: string;
+  specialty: string | null;
+  tier: string | null;
+  score_value: number;
+  contributor_count: number;
+  top_contributors: HcpTargetScoreContributor[];
+  last_call_date: string | null;
+};
+
+// Top affiliated HCPs at an HCO ranked by composite targeting score.
+// Powers the "High-targeting affiliated HCPs" card on /hcos/[hco_key] —
+// surfaces WHY an HCO matters by showing the high-scoring physicians
+// practicing there. Affiliation = HCP.primary_parent_hco_key matches.
+//
+// Includes last_call_date (any rep's most recent call) so the card can
+// flag uncalled high-value HCPs distinct from already-engaged ones.
+// Note: last_call here is tenant-wide (any rep), NOT scoped to viewer.
+// The HCO page itself is shown to anyone in scope; this rollup is
+// answering "what does this HCO offer," not "have I called them."
+export async function loadTopScoringAffiliatedHcps(args: {
+  tenantId: string;
+  hcoKey: string;
+  limit: number;
+}): Promise<AffiliatedHcpScore[]> {
+  const { tenantId, hcoKey, limit } = args;
+
+  try {
+    const rows = await queryFabric<{
+      hcp_key: string;
+      name: string;
+      specialty: string | null;
+      tier: string | null;
+      score_value: number;
+      contributor_count: number;
+      contributors: string | null;
+      last_call_date: string | null;
+    }>(
+      tenantId,
+      `WITH last_calls AS (
+         SELECT hcp_key, MAX(call_date) AS last_call_date
+         FROM gold.fact_call
+         WHERE tenant_id = @tenantId
+           AND hcp_key IS NOT NULL
+         GROUP BY hcp_key
+       )
+       SELECT TOP (@limit)
+         h.hcp_key,
+         h.name,
+         h.specialty_primary AS specialty,
+         h.tier,
+         s.score_value,
+         s.contributor_count,
+         s.contributors,
+         CONVERT(varchar(10), lc.last_call_date, 23) AS last_call_date
+       FROM gold.dim_hcp h
+       JOIN gold.hcp_target_score s
+         ON s.tenant_id = h.tenant_id
+         AND s.hcp_key = h.hcp_key
+         AND s.scope_tag = '__all__'
+       LEFT JOIN last_calls lc
+         ON lc.hcp_key = h.hcp_key
+       WHERE h.tenant_id = @tenantId
+         AND h.primary_parent_hco_key = @hcoKey
+       ORDER BY s.score_value DESC`,
+      { hcoKey, limit },
+    );
+
+    return rows.map((r) => ({
+      hcp_key: r.hcp_key,
+      name: r.name,
+      specialty: r.specialty,
+      tier: r.tier,
+      score_value: r.score_value,
+      contributor_count: r.contributor_count,
+      top_contributors: parseContributors(r.contributors).slice(0, 2),
+      last_call_date: r.last_call_date,
+    }));
+  } catch (err) {
+    console.error("loadTopScoringAffiliatedHcps failed:", err);
+    return [];
+  }
+}
+
 export type TopScoringHcpForRep = {
   hcp_key: string;
   name: string;

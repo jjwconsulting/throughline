@@ -44,6 +44,13 @@ function mergeParams(
 export type InteractionKpis = {
   calls_period: number;
   calls_prior: number;
+  // Live-vs-dropoff split for the period. Calculated against the
+  // SAME filters as calls_period so the breakdown matches the headline
+  // count. When callKind filter is non-'all' these will sum to
+  // calls_period (one of them being 0). Surfaced on the KPI card as
+  // "X live, Y drop-off" sub-line.
+  live_calls_period: number;
+  dropoff_calls_period: number;
   hcps: number;
   hcos: number;
   reps: number;
@@ -58,9 +65,9 @@ export async function loadInteractionKpis(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<InteractionKpis> {
-  const { channelFilter, accountFilter, territoryFilter } =
+  const { channelFilter, accountFilter, territoryFilter, callKindFilter } =
     filterClauses(filters);
-  const extras = `${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}`;
+  const extras = `${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}`;
   const params = mergeParams(filters, scope);
 
   if (filters.range === "all") {
@@ -69,6 +76,8 @@ export async function loadInteractionKpis(
       `SELECT
          COUNT(*) AS calls_period,
          0 AS calls_prior,
+         SUM(CASE WHEN LOWER(COALESCE(f.drop_off_visit, '')) = 'true' THEN 0 ELSE 1 END) AS live_calls_period,
+         SUM(CASE WHEN LOWER(COALESCE(f.drop_off_visit, '')) = 'true' THEN 1 ELSE 0 END) AS dropoff_calls_period,
          COUNT(DISTINCT f.hcp_key) AS hcps,
          COUNT(DISTINCT f.hco_key) AS hcos,
          COUNT(DISTINCT f.owner_user_key) AS reps,
@@ -97,15 +106,15 @@ export async function loadInteractionKpis(
     `WITH all_scope AS (
        SELECT MAX(call_date) AS last_call
        FROM gold.fact_call f
-       WHERE f.tenant_id = @tenantId ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+       WHERE f.tenant_id = @tenantId ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      ),
      window_scope AS (
-       SELECT f.call_date, f.hcp_key, f.hco_key, f.owner_user_key
+       SELECT f.call_date, f.hcp_key, f.hco_key, f.owner_user_key, f.drop_off_visit
        FROM gold.fact_call f
        WHERE f.tenant_id = @tenantId
          AND f.call_date >= @kpiPriorStart
          AND f.call_date <= @kpiPeriodEnd
-         ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+         ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      )
      -- COALESCE on SUMs because they return NULL (not 0) when window_scope
      -- is empty for this RLS scope (e.g., a rep visiting an HCO they don't
@@ -113,6 +122,10 @@ export async function loadInteractionKpis(
      SELECT
        COALESCE(SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN 1 ELSE 0 END), 0) AS calls_period,
        COALESCE(SUM(CASE WHEN w.call_date >= @kpiPriorStart AND w.call_date <= @kpiPriorEnd THEN 1 ELSE 0 END), 0) AS calls_prior,
+       COALESCE(SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd
+                          AND LOWER(COALESCE(w.drop_off_visit, '')) <> 'true' THEN 1 ELSE 0 END), 0) AS live_calls_period,
+       COALESCE(SUM(CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd
+                          AND LOWER(COALESCE(w.drop_off_visit, '')) = 'true' THEN 1 ELSE 0 END), 0) AS dropoff_calls_period,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hcp_key END) AS hcps,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.hco_key END) AS hcos,
        COUNT(DISTINCT CASE WHEN w.call_date >= @kpiPeriodStart AND w.call_date <= @kpiPeriodEnd THEN w.owner_user_key END) AS reps,
@@ -136,7 +149,16 @@ function isoDateMinusDays(iso: string, days: number): string {
 }
 
 function emptyKpis(): InteractionKpis {
-  return { calls_period: 0, calls_prior: 0, hcps: 0, hcos: 0, reps: 0, last_call: null };
+  return {
+    calls_period: 0,
+    calls_prior: 0,
+    live_calls_period: 0,
+    dropoff_calls_period: 0,
+    hcps: 0,
+    hcos: 0,
+    reps: 0,
+    last_call: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +181,7 @@ export async function loadTrend(
   scope: Scope = NO_SCOPE,
 ): Promise<TrendPoint[]> {
   const buckets = chartBuckets(filters);
-  const { channelFilter, accountFilter, territoryFilter } =
+  const { channelFilter, accountFilter, territoryFilter, callKindFilter } =
     filterClauses(filters);
   const { anchorSql, stepUnit, addOneSql } = bucketSqlFragments(filters.granularity);
   const valuesList = Array.from({ length: buckets }, (_, i) => `(${i})`).join(",");
@@ -182,7 +204,7 @@ export async function loadTrend(
        ON f.tenant_id = @tenantId
        AND f.call_date >= b.bucket_start
        AND f.call_date < ${addOneSql}
-       ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+       ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      GROUP BY b.bucket_start
      ORDER BY b.bucket_start ASC`,
     mergeParams(filters, scope),
@@ -249,7 +271,7 @@ export async function loadTopReps(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopRep[]> {
-  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+  const { dateFilter, channelFilter, accountFilter, territoryFilter, callKindFilter } =
     filterClauses(filters);
   return queryFabric<TopRep>(
     tenantId,
@@ -258,7 +280,7 @@ export async function loadTopReps(
      JOIN gold.dim_user u ON u.user_key = f.owner_user_key AND u.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
        AND u.user_type IN ('Sales', 'Medical')
-       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      GROUP BY u.user_key, u.name
      ORDER BY calls DESC`,
     mergeParams(filters, scope),
@@ -281,7 +303,7 @@ export async function loadTopHcps(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopHcp[]> {
-  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+  const { dateFilter, channelFilter, accountFilter, territoryFilter, callKindFilter } =
     filterClauses(filters);
   return queryFabric<TopHcp>(
     tenantId,
@@ -289,7 +311,7 @@ export async function loadTopHcps(
      FROM gold.fact_call f
      JOIN gold.dim_hcp h ON h.hcp_key = f.hcp_key AND h.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      GROUP BY h.hcp_key, h.name, h.specialty_primary
      ORDER BY calls DESC`,
     mergeParams(filters, scope),
@@ -314,7 +336,7 @@ export async function loadTopHcos(
   filters: DashboardFilters,
   scope: Scope = NO_SCOPE,
 ): Promise<TopHco[]> {
-  const { dateFilter, channelFilter, accountFilter, territoryFilter } =
+  const { dateFilter, channelFilter, accountFilter, territoryFilter, callKindFilter } =
     filterClauses(filters);
   return queryFabric<TopHco>(
     tenantId,
@@ -322,7 +344,7 @@ export async function loadTopHcos(
      FROM gold.fact_call f
      JOIN gold.dim_hco h ON h.hco_key = f.hco_key AND h.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${scopeSql(scope)}
+       ${dateFilter} ${channelFilter} ${accountFilter} ${territoryFilter} ${callKindFilter} ${scopeSql(scope)}
      GROUP BY h.hco_key, h.name, h.hco_type, h.city, h.state
      ORDER BY calls DESC`,
     mergeParams(filters, scope),

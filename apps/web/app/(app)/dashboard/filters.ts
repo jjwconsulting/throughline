@@ -38,6 +38,22 @@ export type CallChannel = (typeof CALL_CHANNELS)[number];
 export const ACCOUNT_TYPES = ["all", "hcp", "hco"] as const;
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 
+// Drop-off vs Live engagement filter. Splits "real engagement" (live
+// conversations) from "logistical touches" (rep dropped materials at
+// reception without seeing the HCP). Fennec captures this via the
+// `drop_off_visit__c` boolean (silver.call.drop_off_visit). Tenants
+// who don't use this field will have NULL drop_off_visit, treated as
+// "live" by default — non-fennec tenants get unchanged behavior when
+// the filter is "all" or "live".
+export const CALL_KINDS = ["all", "live", "dropoff"] as const;
+export type CallKind = (typeof CALL_KINDS)[number];
+
+export const CALL_KIND_LABELS: Record<CallKind, string> = {
+  all: "All calls",
+  live: "Live engagements",
+  dropoff: "Drop-off visits",
+};
+
 // Trend chart bucket size. Controls how the line groups call_date.
 //   week    — Monday-anchored, ~7 day buckets
 //   month   — calendar-month buckets
@@ -62,6 +78,8 @@ export type DashboardFilters = {
   // call loaders are not territory-aware until fact_call gains an HCO/
   // territory dimension. See project_gold_fact_call_followups.
   territory: string | null;
+  // Live engagement vs drop-off visit slice. Default 'all'.
+  callKind: CallKind;
 };
 
 export const DEFAULT_FILTERS: DashboardFilters = {
@@ -70,6 +88,7 @@ export const DEFAULT_FILTERS: DashboardFilters = {
   account: "all",
   granularity: "week",
   territory: null,
+  callKind: "all",
 };
 
 export function parseFilters(
@@ -88,7 +107,8 @@ export function parseFilters(
     : raw.territory;
   const territory =
     territoryRaw && territoryRaw.length > 0 ? territoryRaw : null;
-  return { range, channel, account, granularity, territory };
+  const callKind = pickEnum(raw.callKind, CALL_KINDS, DEFAULT_FILTERS.callKind);
+  return { range, channel, account, granularity, territory, callKind };
 }
 
 // SQL fragment + params hook for territory-aware sales loaders. Returns
@@ -136,6 +156,7 @@ export function filterClauses(filters: DashboardFilters): {
   channelFilter: string;
   accountFilter: string;
   territoryFilter: string;
+  callKindFilter: string;
 } {
   const dates = rangeDates(filters.range);
   const dateFilter = dates
@@ -143,6 +164,16 @@ export function filterClauses(filters: DashboardFilters): {
     : "";
   const channelFilter =
     filters.channel === "all" ? "" : `AND f.call_channel = @channel`;
+  // Live = NOT a dropoff. Treat NULL drop_off_visit as live (the field
+  // is fennec-custom; tenants without it have NULL, which represents
+  // "no special classification = live by default"). LOWER() handles
+  // 'true' / 'True' / 'TRUE' bronze variations.
+  const callKindFilter =
+    filters.callKind === "live"
+      ? "AND (f.drop_off_visit IS NULL OR LOWER(f.drop_off_visit) <> 'true')"
+      : filters.callKind === "dropoff"
+        ? "AND LOWER(f.drop_off_visit) = 'true'"
+        : "";
   // hcp_key + hco_key are mutually exclusive on each fact row: a call hits
   // exactly one account type, so the relevant key is non-NULL on that row.
   const accountFilter =
@@ -169,7 +200,13 @@ export function filterClauses(filters: DashboardFilters): {
           AND b.territory_key = @filterTerritory
       )`
     : "";
-  return { dateFilter, channelFilter, accountFilter, territoryFilter };
+  return {
+    dateFilter,
+    channelFilter,
+    accountFilter,
+    territoryFilter,
+    callKindFilter,
+  };
 }
 
 // Number of days the current range covers, end-inclusive. Null for "all".

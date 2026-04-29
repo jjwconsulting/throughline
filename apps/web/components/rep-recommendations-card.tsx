@@ -9,18 +9,28 @@ import type {
   SalesQuarter,
   RecentCall,
 } from "@/lib/rep-recommendations";
+import { veevaAccountUrl } from "@/lib/veeva-url";
+import CallBriefButton from "@/components/call-brief-button";
 
 // "Suggested this week" card on /reps/[user_key]. Per-row expand
-// reveals contextual prep info instead of a passive read of the
-// recommendation:
-//   - HCO row: top affiliated HCPs at this HCO + sales mini-trend
-//   - HCP row: parent HCO summary + parent's sales trend + recent calls
+// reveals contextual prep info + action launchpad (Open in Veeva,
+// Generate call brief). Action launchpad is Surface C v2 — see
+// `project_rep_action_paradigm` memory.
 //
-// Per `project_rep_action_paradigm` memory: deliberately NOT a
-// "Mark as called" checkbox — Veeva is the source of truth for calls.
-// Action buttons help reps EXECUTE the suggestion (here: prep info
-// inline, no navigation needed). Future buttons can layer on top of
-// this expand pattern.
+// Per the rep-action-paradigm:
+//   - DO: action buttons that help reps execute the suggestion
+//     (deep links into Veeva, on-demand LLM call brief generation,
+//     prep context inline).
+//   - DON'T: "Mark as called" or other state-tracking. Veeva is the
+//     source of truth for calls; a parallel UI would diverge.
+//
+// Vault-domain-aware Veeva URL: built as
+//   `https://<vault_domain>/ui/#object/account__v/<veeva_account_id>`
+// matching the Veeva Vault hash-routed UI pattern. Some pharma tenants
+// run on Veeva CRM (Salesforce-Lightning) instead, with a different
+// URL pattern (`/lightning/r/Account/<id>/view`) — flagged in the
+// `feedback_veeva_url_per_tenant` memory as a per-tenant config TODO.
+// Hardcoded Vault pattern today since it works for fennec.
 
 const SEVERITY_BADGE: Record<
   NonNullable<RepRecommendationItem["severity"]>,
@@ -44,6 +54,9 @@ const SEVERITY_BADGE: Record<
 export default function RepRecommendationsCard({
   items,
   contextByItemKey,
+  veevaAccountIdByItemKey,
+  vaultDomain,
+  repUserKey,
   generatedAt,
   repFirstName,
 }: {
@@ -51,6 +64,16 @@ export default function RepRecommendationsCard({
   // Server passes as plain object so it serializes cleanly across the
   // RSC boundary. Key format: `${kind}:${key}`.
   contextByItemKey: Record<string, RecommendationContext>;
+  // Veeva account_id (CRM record id) per item, used to build deep
+  // links. Keyed identically to contextByItemKey.
+  veevaAccountIdByItemKey: Record<string, string>;
+  // Tenant's Veeva vault domain (e.g. "fennecpharma-crm.veevavault.com").
+  // null = no Veeva config; the Open-in-Veeva button is hidden.
+  vaultDomain: string | null;
+  // Which rep these recommendations are for (target of the call brief
+  // server action — needed for RLS + cache key). Distinct from the
+  // viewer (a manager viewing one of their reps' pages).
+  repUserKey: string;
   generatedAt: Date | string;
   repFirstName: string;
 }) {
@@ -133,7 +156,15 @@ export default function RepRecommendationsCard({
                 </button>
               </div>
               {isOpen && ctx ? (
-                <div className="px-5 pb-4 pt-1 bg-[var(--color-surface-alt)]/30 border-t border-[var(--color-border)]">
+                <div className="px-5 pb-4 pt-3 bg-[var(--color-surface-alt)]/30 border-t border-[var(--color-border)] space-y-4">
+                  <ActionLaunchpad
+                    itemKey={itemKey}
+                    veevaAccountId={veevaAccountIdByItemKey[itemKey] ?? null}
+                    vaultDomain={vaultDomain}
+                    repUserKey={repUserKey}
+                    entityKind={item.kind}
+                    entityKey={item.key}
+                  />
                   {ctx.kind === "hco" ? (
                     <HcoContext context={ctx} />
                   ) : (
@@ -145,6 +176,56 @@ export default function RepRecommendationsCard({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+function ActionLaunchpad({
+  itemKey: _itemKey,
+  veevaAccountId,
+  vaultDomain,
+  repUserKey,
+  entityKind,
+  entityKey,
+}: {
+  itemKey: string;
+  veevaAccountId: string | null;
+  vaultDomain: string | null;
+  repUserKey: string;
+  entityKind: "hcp" | "hco";
+  entityKey: string;
+}) {
+  const veevaUrl = veevaAccountUrl(vaultDomain, veevaAccountId);
+
+  return (
+    <div className="space-y-2">
+      {veevaUrl ? (
+        <div>
+          <a
+            href={veevaUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs rounded-md px-3 py-1.5 bg-[var(--color-primary)] text-white hover:opacity-90"
+          >
+            Open in Veeva
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              className="h-3 w-3"
+              aria-hidden="true"
+            >
+              <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
+              <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+            </svg>
+          </a>
+        </div>
+      ) : null}
+      <CallBriefButton
+        repUserKey={repUserKey}
+        entityKind={entityKind}
+        entityKey={entityKey}
+      />
     </div>
   );
 }

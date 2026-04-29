@@ -30,8 +30,11 @@ import RepRecommendationsCard from "@/components/rep-recommendations-card";
 import {
   loadRepRecommendations,
   loadRecommendationContexts,
+  loadVeevaAccountIdsForItems,
   type RecommendationContext,
 } from "@/lib/rep-recommendations";
+import { db } from "@/lib/db";
+import { eq, schema } from "@throughline/db";
 import TrendChart from "../../dashboard/trend-chart";
 import FilterBar from "../../dashboard/filter-bar";
 import AccountToggle from "../../dashboard/account-toggle";
@@ -127,17 +130,38 @@ async function RecommendationsWithContext({
   generatedAt: Date;
   repFirstName: string;
 }) {
-  const ctxMap = await loadRecommendationContexts({
-    tenantId,
-    repUserKey,
-    items: items.map((i) => ({ kind: i.kind, key: i.key })),
-  });
+  // Three batched lookups for the action-launchpad pattern:
+  //  - contexts: per-row prep info (HCO/HCP context panel)
+  //  - veeva account IDs: needed for "Open in Veeva" deep links
+  //  - vault domain: per-tenant Veeva/Salesforce instance host
+  // Vault domain comes from Postgres (tenant_veeva is admin-edited;
+  // Postgres is authoritative per project_postgres_authoritative memory).
+  const [ctxMap, veevaAccountIdByItemKey, tenantVeevaRows] = await Promise.all([
+    loadRecommendationContexts({
+      tenantId,
+      repUserKey,
+      items: items.map((i) => ({ kind: i.kind, key: i.key })),
+    }),
+    loadVeevaAccountIdsForItems({
+      tenantId,
+      items: items.map((i) => ({ kind: i.kind, key: i.key })),
+    }),
+    db
+      .select({ vaultDomain: schema.tenantVeeva.vaultDomain })
+      .from(schema.tenantVeeva)
+      .where(eq(schema.tenantVeeva.tenantId, tenantId))
+      .limit(1),
+  ]);
   const contextByItemKey: Record<string, RecommendationContext> = {};
   for (const [k, v] of ctxMap.entries()) contextByItemKey[k] = v;
+  const vaultDomain = tenantVeevaRows[0]?.vaultDomain ?? null;
   return (
     <RepRecommendationsCard
       items={items}
       contextByItemKey={contextByItemKey}
+      veevaAccountIdByItemKey={veevaAccountIdByItemKey}
+      vaultDomain={vaultDomain}
+      repUserKey={repUserKey}
       generatedAt={generatedAt}
       repFirstName={repFirstName}
     />

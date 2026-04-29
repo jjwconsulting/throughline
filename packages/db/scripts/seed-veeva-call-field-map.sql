@@ -53,6 +53,10 @@ CROSS JOIN (VALUES
   ('check_in_status',      'check_in_status__v'),
   ('is_sampled_call',      'is_sampled_call__v'),
   ('is_remote_meeting',    'remote_meeting__v'),
+  -- Fennec custom: drop-off visit boolean. True = rep dropped materials
+  -- without seeing the HCP. Splits "real engagement" from logistical
+  -- touches. See fennec/Fact_Calls.ipynb.
+  ('drop_off_visit',       'drop_off_visit__c'),
 
   -- Where
   ('city',                 'city__v'),

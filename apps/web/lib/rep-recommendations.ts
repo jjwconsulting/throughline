@@ -760,6 +760,62 @@ function isoDateMinusDays(d: Date, days: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// Veeva account ID lookup — batches the Veeva account_id (the CRM record
+// id) for each recommendation item so the action launchpad can build
+// "Open in Veeva" deep links. Single round-trip across all items via
+// IN-clause + UNION ALL between dim_hcp and dim_hco.
+// ---------------------------------------------------------------------------
+
+export async function loadVeevaAccountIdsForItems(args: {
+  tenantId: string;
+  items: { kind: "hcp" | "hco"; key: string }[];
+}): Promise<Record<string, string>> {
+  const { tenantId, items } = args;
+  if (items.length === 0) return {};
+
+  const hcpKeys = items.filter((i) => i.kind === "hcp").map((i) => i.key);
+  const hcoKeys = items.filter((i) => i.kind === "hco").map((i) => i.key);
+  const escIn = (keys: string[]) =>
+    keys.map((k) => `'${k.replace(/'/g, "''")}'`).join(",");
+
+  try {
+    const parts: string[] = [];
+    if (hcpKeys.length > 0) {
+      parts.push(
+        `SELECT 'hcp' AS kind, hcp_key AS surrogate_key, veeva_account_id
+         FROM gold.dim_hcp
+         WHERE tenant_id = @tenantId AND hcp_key IN (${escIn(hcpKeys)})`,
+      );
+    }
+    if (hcoKeys.length > 0) {
+      parts.push(
+        `SELECT 'hco' AS kind, hco_key AS surrogate_key, veeva_account_id
+         FROM gold.dim_hco
+         WHERE tenant_id = @tenantId AND hco_key IN (${escIn(hcoKeys)})`,
+      );
+    }
+    if (parts.length === 0) return {};
+
+    const rows = await queryFabric<{
+      kind: "hcp" | "hco";
+      surrogate_key: string;
+      veeva_account_id: string | null;
+    }>(tenantId, parts.join("\nUNION ALL\n"));
+
+    const out: Record<string, string> = {};
+    for (const r of rows) {
+      if (r.veeva_account_id) {
+        out[`${r.kind}:${r.surrogate_key}`] = r.veeva_account_id;
+      }
+    }
+    return out;
+  } catch (err) {
+    console.error("loadVeevaAccountIdsForItems failed:", err);
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Recommendation context — what to show when a rep expands a row.
 //
 // For HCO suggestions (the dominant case for underactive coverage):

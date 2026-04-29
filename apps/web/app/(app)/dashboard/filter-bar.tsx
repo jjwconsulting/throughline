@@ -4,12 +4,15 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import {
   CALL_CHANNELS,
+  CALL_KINDS,
+  CALL_KIND_LABELS,
   DEFAULT_FILTERS,
   GRANULARITIES,
   GRANULARITY_LABELS,
   TIME_RANGES,
   TIME_RANGE_LABELS,
   type CallChannel,
+  type CallKind,
   type DashboardFilters,
   type Granularity,
   type TimeRange,
@@ -51,6 +54,8 @@ export default function FilterBar({
     else params.set("granularity", merged.granularity);
     if (merged.territory) params.set("territory", merged.territory);
     else params.delete("territory");
+    if (merged.callKind === DEFAULT_FILTERS.callKind) params.delete("callKind");
+    else params.set("callKind", merged.callKind);
     const qs = params.toString();
     startTransition(() => {
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -84,6 +89,16 @@ export default function FilterBar({
           label: c === "all" ? "All channels" : c,
         }))}
         onChange={(v) => update({ channel: v as CallChannel })}
+        disabled={pending}
+      />
+      <Select
+        label="Type"
+        value={filters.callKind}
+        options={CALL_KINDS.map((k) => ({
+          value: k,
+          label: CALL_KIND_LABELS[k],
+        }))}
+        onChange={(v) => update({ callKind: v as CallKind })}
         disabled={pending}
       />
       {territories.length > 0 ? (

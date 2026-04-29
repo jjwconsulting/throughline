@@ -7,7 +7,18 @@ import {
   hcpScope,
   type Scope,
 } from "@/lib/interactions";
+import { loadAllScoresForHcp } from "@/lib/hcp-target-scores";
+import {
+  loadSinceLastVisit,
+  loadPeerCohort,
+} from "@/lib/hcp-page-insights";
 import { getCurrentScope, scopeToSql, combineScopes } from "@/lib/scope";
+import { db } from "@/lib/db";
+import { eq, schema } from "@throughline/db";
+import TargetScoreCard from "@/components/target-score-card";
+import HcpSnapshotCard from "@/components/hcp-snapshot-card";
+import SinceLastVisitCard from "@/components/since-last-visit-card";
+import PeerCohortCard from "@/components/peer-cohort-card";
 import {
   filterClauses,
   filtersToParams,
@@ -36,6 +47,10 @@ type HcpHeader = {
   is_kol: boolean | null;
   is_speaker: boolean | null;
   status: string | null;
+  primary_parent_hco_key: string | null;
+  primary_parent_hco_name: string | null;
+  // CRM record id — needed for Veeva deep links from the snapshot.
+  veeva_account_id: string | null;
 };
 
 async function loadHcp(
@@ -46,12 +61,37 @@ async function loadHcp(
     tenantId,
     `SELECT TOP 1
        hcp_key, name, credentials, specialty_primary, specialty_secondary,
-       city, state, npi, tier, is_prescriber, is_kol, is_speaker, status
+       city, state, npi, tier, is_prescriber, is_kol, is_speaker, status,
+       primary_parent_hco_key, primary_parent_hco_name,
+       veeva_account_id
      FROM gold.dim_hcp
      WHERE tenant_id = @tenantId AND hcp_key = @hcpKey`,
     { hcpKey },
   );
   return rows[0] ?? null;
+}
+
+// Last-ever call date (filter-independent). The KPI card's
+// `last_contact` is filter-scoped — for the snapshot's engagement
+// status we want overall HCP recency regardless of the page's range
+// filter.
+async function loadLastCallEver(
+  tenantId: string,
+  hcpKey: string,
+): Promise<string | null> {
+  try {
+    const rows = await queryFabric<{ last_call: string | null }>(
+      tenantId,
+      `SELECT CONVERT(varchar(10), MAX(call_date), 23) AS last_call
+       FROM gold.fact_call
+       WHERE tenant_id = @tenantId AND hcp_key = @hcpKey`,
+      { hcpKey },
+    );
+    return rows[0]?.last_call ?? null;
+  } catch (err) {
+    console.error("loadLastCallEver failed:", err);
+    return null;
+  }
 }
 
 // HCP page-specific: which reps called this HCP. Not generalizable enough
@@ -70,7 +110,7 @@ async function loadHcpCallingReps(
   filters: DashboardFilters,
   scope: Scope,
 ): Promise<CallingRep[]> {
-  const { dateFilter, channelFilter } = filterClauses(filters);
+  const { dateFilter, channelFilter, callKindFilter } = filterClauses(filters);
   return queryFabric<CallingRep>(
     tenantId,
     `SELECT TOP 10 u.user_key, u.name, u.title,
@@ -79,7 +119,7 @@ async function loadHcpCallingReps(
      FROM gold.fact_call f
      JOIN gold.dim_user u ON u.user_key = f.owner_user_key AND u.tenant_id = @tenantId
      WHERE f.tenant_id = @tenantId
-       ${dateFilter} ${channelFilter} ${scope.clauses.join(" ")}
+       ${dateFilter} ${channelFilter} ${callKindFilter} ${scope.clauses.join(" ")}
      GROUP BY u.user_key, u.name, u.title
      ORDER BY calls DESC`,
     { ...filtersToParams(filters), ...scope.params },
@@ -142,11 +182,41 @@ export default async function HcpDetail({
   // is RLS-scoped: a rep only sees calls THEY made to this HCP, a manager
   // sees calls their team made, etc.
   const sqlScope = combineScopes(hcpScope(hcp_key), scopeToSql(userScope));
-  const [kpis, trend, callingReps] = await Promise.all([
+  // Viewer's user_key is only meaningful when the viewer IS a rep —
+  // anchors the "Since your last visit" panel on their own most recent
+  // call. Manager/admin/bypass viewers fall back to tenant-wide
+  // most-recent call as the anchor (handled by the loader).
+  const viewerUserKey =
+    userScope.role === "rep" ? userScope.userKey : null;
+  const [
+    kpis,
+    trend,
+    callingReps,
+    scores,
+    sinceLastVisit,
+    peerCohort,
+    lastCallEver,
+    tenantVeevaRows,
+  ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, sqlScope),
     loadTrend(tenantId, filters, sqlScope),
     loadHcpCallingReps(tenantId, filters, sqlScope),
+    // Targeting score is HCP-grain (not RLS-scoped — score is an
+    // attribute of the HCP itself, same as tier/specialty above).
+    loadAllScoresForHcp({ tenantId, hcpKey: hcp_key }),
+    loadSinceLastVisit({ tenantId, hcpKey: hcp_key, viewerUserKey }),
+    loadPeerCohort({ tenantId, hcpKey: hcp_key }),
+    // Snapshot uses ALL-time last-call recency for engagement status,
+    // so it isn't dependent on the page's range filter.
+    loadLastCallEver(tenantId, hcp_key),
+    // Vault domain for the snapshot's "Open in Veeva" deep link.
+    db
+      .select({ vaultDomain: schema.tenantVeeva.vaultDomain })
+      .from(schema.tenantVeeva)
+      .where(eq(schema.tenantVeeva.tenantId, tenantId))
+      .limit(1),
   ]);
+  const vaultDomain = tenantVeevaRows[0]?.vaultDomain ?? null;
 
   const period = periodLabel(filters.range);
   const cards = [
@@ -225,6 +295,22 @@ export default async function HcpDetail({
         </div>
       </div>
 
+      <HcpSnapshotCard
+        inputs={{
+          scores,
+          last_call_ever: lastCallEver,
+          tier: hcp.tier,
+          parent_hco_key: hcp.primary_parent_hco_key,
+          parent_hco_name: hcp.primary_parent_hco_name,
+          veeva_account_id: hcp.veeva_account_id,
+          vault_domain: vaultDomain,
+          hcp_key: hcp_key,
+          viewer_user_key: viewerUserKey,
+        }}
+      />
+
+      <SinceLastVisitCard data={sinceLastVisit} />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {cards.map((c) => (
           <div
@@ -241,6 +327,10 @@ export default async function HcpDetail({
           </div>
         ))}
       </div>
+
+      <TargetScoreCard scores={scores} />
+
+      <PeerCohortCard data={peerCohort} />
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
         <div className="px-5 py-4 border-b border-[var(--color-border)]">
