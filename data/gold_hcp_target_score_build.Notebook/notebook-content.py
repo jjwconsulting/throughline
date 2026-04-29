@@ -81,10 +81,10 @@ CREATE TABLE IF NOT EXISTS {GOLD_SCORE} (
   -- Number of attributes that contributed. Useful as a confidence hint:
   -- a score from 6 contributing attributes is more reliable than 1.
   contributor_count INT NOT NULL,
-  -- JSON array of the top contributing attributes, each:
-  -- { "attribute_name": "...", "raw_value": "...", "normalized": <0-100>,
-  --   "source_label": "...", "scope_tag": "..." }
-  -- Surfaced verbatim to the LLM for "why is this HCP scored X" reasoning.
+  -- JSON array of the top contributing attributes. Each element has
+  -- attribute_name, raw_value, normalized (0-100), source_label,
+  -- scope_tag. Surfaced verbatim to the LLM for "why is this HCP
+  -- scored X" reasoning.
   contributors  STRING,
   gold_built_at TIMESTAMP NOT NULL
 ) USING DELTA
