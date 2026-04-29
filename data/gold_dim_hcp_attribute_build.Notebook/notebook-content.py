@@ -146,19 +146,29 @@ print(f"Wrote {row_count:,} rows to {GOLD_TABLE}")
 # Verification
 
 print("=== Per-tenant counts + dim_hcp join coverage ===")
+# Spark rejects correlated scalar subqueries in SELECT alongside GROUP BY,
+# so aggregate gold + silver separately then JOIN.
 spark.sql(f"""
+  WITH gold_agg AS (
+    SELECT tenant_id,
+           COUNT(*) AS gold_rows,
+           COUNT(DISTINCT hcp_key) AS hcps_with_attrs
+    FROM {GOLD_TABLE}
+    GROUP BY tenant_id
+  ),
+  silver_agg AS (
+    SELECT tenant_id, COUNT(*) AS silver_rows
+    FROM {SILVER_TABLE}
+    GROUP BY tenant_id
+  )
   SELECT
     g.tenant_id,
-    COUNT(*) AS gold_rows,
-    COUNT(DISTINCT g.hcp_key) AS hcps_with_attrs,
-    (SELECT COUNT(*) FROM {SILVER_TABLE} s WHERE s.tenant_id = g.tenant_id) AS silver_rows,
-    ROUND(
-      100.0 * COUNT(*) /
-      NULLIF((SELECT COUNT(*) FROM {SILVER_TABLE} s WHERE s.tenant_id = g.tenant_id), 0),
-      1
-    ) AS pct_silver_resolved_to_dim
-  FROM {GOLD_TABLE} g
-  GROUP BY g.tenant_id
+    g.gold_rows,
+    g.hcps_with_attrs,
+    s.silver_rows,
+    ROUND(100.0 * g.gold_rows / NULLIF(s.silver_rows, 0), 1) AS pct_silver_resolved_to_dim
+  FROM gold_agg g
+  LEFT JOIN silver_agg s ON s.tenant_id = g.tenant_id
   ORDER BY g.tenant_id
 """).show(truncate=False)
 
