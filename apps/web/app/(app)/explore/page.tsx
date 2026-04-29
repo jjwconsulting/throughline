@@ -153,7 +153,7 @@ export default async function ExplorePage({
           />
         </div>
         {matrix.unsupported ? (
-          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)]">
+          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)] italic">
             This combination isn&apos;t available. Try switching the
             metric or row / group dimension.
           </div>

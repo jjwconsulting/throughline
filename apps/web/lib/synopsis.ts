@@ -25,6 +25,7 @@ import {
 import { loadAllSignals } from "@/lib/signals";
 import { type Scope } from "@/lib/interactions";
 import { type UserScope, scopeLabel } from "@/lib/scope";
+import { LLM_CORE_RULES } from "@/lib/llm-utils";
 import { DEFAULT_FILTERS } from "@/app/(app)/dashboard/filters";
 
 const MODEL = "claude-sonnet-4-6";
@@ -302,8 +303,9 @@ const SYSTEM_PROMPT = `You are a commercial analytics assistant for a pharma sal
 The user just opened their dashboard. Your job is to summarize what materially changed since their \
 last data refresh — top movers, dropped customers, urgent signals — in 3-4 sentences of plain prose.
 
-Hard rules:
-- Use ONLY names and numbers from the input. Never invent a fact, account, rep, or number.
+${LLM_CORE_RULES}
+
+Surface-specific rules:
 - Lead with the most consequential single item. Tie related items together when patterns emerge \
 (e.g., "Memorial Hospital dropped 40% AND landed on the watch list — likely needs a touchpoint").
 - Be specific: account names, units, percentages, rep names. No vague "some accounts trended down."

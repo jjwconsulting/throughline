@@ -369,7 +369,7 @@ export default async function HcpDetail({
               <tr>
                 <td
                   colSpan={5}
-                  className="px-5 py-6 text-center text-[var(--color-ink-muted)]"
+                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
                 >
                   No calls in this period.
                 </td>

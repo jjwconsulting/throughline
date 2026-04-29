@@ -21,6 +21,7 @@ import { and, desc, eq, schema } from "@throughline/db";
 import { db } from "@/lib/db";
 import { queryFabric } from "@/lib/fabric";
 import { loadAllScoresForHcp } from "@/lib/hcp-target-scores";
+import { parseLlmJson, LLM_CORE_RULES } from "@/lib/llm-utils";
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 500;
@@ -577,18 +578,18 @@ function salesMotionRow(
 
 const SYSTEM_PROMPT = `You are a commercial analytics assistant generating a short pre-call brief for a pharma sales rep.
 
-Hard rules:
+${LLM_CORE_RULES}
+
+Surface-specific rules:
 - Output 4-6 BULLETS. Each bullet is ONE sentence, ~12-20 words.
-- Cite specific facts from the input (numbers, dates, score values, attribute names, products, materials) when relevant. NEVER invent data.
 - Order bullets by importance: targeting signal first (if score is high), then sales motion, then engagement gap, then closing/relationship.
 - For HCPs with high targeting scores, cite the score + a top contributor ("Composite score 87 driven by top-decile cisplatin volume — strong Pedmark fit").
 - For underactive engagement, cite the gap explicitly ("Last call was 9 weeks ago" or "Never called by this rep").
 - For HCO calls, mention the affiliated HCPs that should be the focus when relevant ("Dr. Smith (T1, score 91) is the highest-value HCP here").
-- DROP-OFF VS LIVE: when "is_drop_off" is true on past calls, those were logistical drops (rep dropped materials without seeing the HCP) — NOT real conversations. Don't treat them as engagement context. Distinguish "you dropped materials 3 times but haven't had a live conversation" if relevant.
+- DROP-OFF VS LIVE: when "is_drop_off" is true on past calls, those were logistical drops (rep dropped materials without seeing the HCP) — NOT real conversations. Distinguish "you dropped materials 3 times but haven't had a live conversation" if relevant.
 - NOTES + PRE/NEXT-CALL NOTES: when present on recent_calls_by_this_rep, these are the rep's own written context. Quote or paraphrase specific items ("you flagged dosing concerns last visit") — this is the highest-signal input when it exists.
 - PRODUCTS + MATERIALS: detailed_products + materials_used on past calls show what's been discussed. Surface continuity ("you've detailed Pedmark every visit") or gaps ("never discussed [X] despite high relevance").
 - Avoid vague filler ("good engagement opportunity"). Every bullet should carry an actionable specific.
-- Tone: direct, terse, peer-to-peer. No greetings, no signoffs.
 
 Output ONLY a JSON object with this exact shape, no preamble, no markdown fences:
 { "bullets": ["...", "...", "..."] }
@@ -596,28 +597,18 @@ Output ONLY a JSON object with this exact shape, no preamble, no markdown fences
 If the input lacks any meaningful signal, return { "bullets": [] }.`;
 
 function parseBrief(raw: string): CallBrief | null {
-  if (typeof raw !== "string") return null;
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
-  const candidate = fenced ? fenced[1]! : raw;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !("bullets" in parsed) ||
-    !Array.isArray((parsed as { bullets: unknown }).bullets)
-  ) {
-    return null;
-  }
-  const bullets = (parsed as { bullets: unknown[] }).bullets.filter(
-    (b): b is string => typeof b === "string" && b.trim().length > 0,
-  );
-  return { bullets };
+  return parseLlmJson<CallBrief>(raw, (parsed) => {
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("bullets" in parsed) ||
+      !Array.isArray((parsed as { bullets: unknown }).bullets)
+    ) {
+      return null;
+    }
+    const bullets = (parsed as { bullets: unknown[] }).bullets.filter(
+      (b): b is string => typeof b === "string" && b.trim().length > 0,
+    );
+    return { bullets };
+  });
 }

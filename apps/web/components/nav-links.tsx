@@ -11,7 +11,11 @@ const MAIN_LINKS: { href: string; label: string; icon: IconName }[] = [
   { href: "/ask", label: "Ask", icon: "sparkles" },
   { href: "/reports", label: "Reports", icon: "reports" },
   { href: "/admin/tenants", label: "Admin", icon: "admin" },
-  { href: "/settings", label: "Settings", icon: "settings" },
+  // /settings is a "Coming soon" placeholder — hidden from nav until
+  // it has real content, otherwise looks broken to first-time users.
+  // Re-add this entry when settings has shippable surfaces (profile,
+  // notification preferences, etc.). Per audit 2026-04-29 §1.
+  // { href: "/settings", label: "Settings", icon: "settings" },
 ];
 
 // Admin link is active for any /admin/* route. Dashboard is active for HCP/Rep

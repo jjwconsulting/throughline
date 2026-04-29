@@ -97,8 +97,8 @@ export default async function AdminUsersPage() {
             </p>
           </div>
           {veevaReps.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
-              No active field reps in <span className="font-mono">gold.dim_user</span>.
+            <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic">
+              No active field reps in <span className="font-mono not-italic">gold.dim_user</span>.
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -160,7 +160,7 @@ export default async function AdminUsersPage() {
               <tr>
                 <td
                   colSpan={5}
-                  className="px-4 py-8 text-center text-[var(--color-ink-muted)]"
+                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
                 >
                   No users provisioned yet.
                 </td>

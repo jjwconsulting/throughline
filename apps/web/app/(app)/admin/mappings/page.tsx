@@ -107,9 +107,9 @@ export default async function AdminMappingsPage() {
           </p>
         </div>
         {unmapped.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)]">
+          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)] italic">
             No unmapped accounts. Either everything is mapped, or
-            <span className="font-mono"> gold.fact_sale</span> hasn&apos;t been
+            <span className="font-mono not-italic"> gold.fact_sale</span> hasn&apos;t been
             built yet.
           </div>
         ) : (

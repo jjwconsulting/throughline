@@ -66,11 +66,11 @@ export default function SavedMappingsList({
       </div>
 
       {rows.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
+        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic">
           No mappings saved yet.
         </div>
       ) : filtered.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
+        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic">
           No mappings match &ldquo;{query}&rdquo;.
         </div>
       ) : (

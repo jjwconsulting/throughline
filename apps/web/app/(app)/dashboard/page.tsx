@@ -28,6 +28,7 @@ import {
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
 import SynopsisCard from "@/components/synopsis-card";
+import AccountMotionPanel from "@/components/account-motion-panel";
 import { loadDashboardSynopsis } from "@/lib/synopsis";
 import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
@@ -88,7 +89,16 @@ export default async function Dashboard({
 }: {
   searchParams: SearchParams;
 }) {
-  const filters = parseFilters(await searchParams);
+  const sp = await searchParams;
+  const filters = parseFilters(sp);
+  // Account motion tab — URL-driven so views are bookmarkable.
+  const motionTabRaw = Array.isArray(sp.motion) ? sp.motion[0] : sp.motion;
+  const motionTab: "rising" | "declining" | "watch" | "new" =
+    motionTabRaw === "declining" ||
+    motionTabRaw === "watch" ||
+    motionTabRaw === "new"
+      ? motionTabRaw
+      : "rising";
   const { userEmail, resolution } = await getCurrentScope();
 
   if (!resolution || !resolution.ok) {
@@ -318,7 +328,13 @@ export default async function Dashboard({
         <div>
           <h1 className="font-display text-3xl">Dashboard</h1>
           <p className="text-[var(--color-ink-muted)]">
-            Live from gold tables. Filters apply to all panels below.
+            Live from gold tables. Filters apply to all panels below.{" "}
+            <Link
+              href="/reports"
+              className="text-[var(--color-primary)] hover:underline"
+            >
+              Open Power BI →
+            </Link>
           </p>
         </div>
         <FilterBar filters={filters} territories={accessibleTerritories} />
@@ -605,27 +621,38 @@ export default async function Dashboard({
               </tr>
             </thead>
             <tbody>
-              {topReps.map((r, i) => (
-                <tr
-                  key={r.user_key}
-                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                >
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {i + 1}
-                  </td>
-                  <td className="px-5 py-2">
-                    <Link
-                      href={`/reps/${encodeURIComponent(r.user_key)}`}
-                      className="text-[var(--color-primary)] hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono">
-                    {formatNumber(r.calls)}
+              {topReps.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={3}
+                    className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
+                  >
+                    No calls in this period.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                topReps.map((r, i) => (
+                  <tr
+                    key={r.user_key}
+                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                  >
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {i + 1}
+                    </td>
+                    <td className="px-5 py-2">
+                      <Link
+                        href={`/reps/${encodeURIComponent(r.user_key)}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono">
+                      {formatNumber(r.calls)}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -651,33 +678,44 @@ export default async function Dashboard({
                 </tr>
               </thead>
               <tbody>
-                {topHcos.map((h, i) => (
-                  <tr
-                    key={h.hco_key}
-                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                  >
-                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                      {i + 1}
-                    </td>
-                    <td className="px-5 py-2">
-                      <Link
-                        href={`/hcos/${encodeURIComponent(h.hco_key)}`}
-                        className="text-[var(--color-primary)] hover:underline"
-                      >
-                        {h.name}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                      {h.hco_type ?? "—"}
-                    </td>
-                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                      {[h.city, h.state].filter(Boolean).join(", ") || "—"}
-                    </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(h.calls)}
+                {topHcos.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
+                    >
+                      No HCO calls in this period.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  topHcos.map((h, i) => (
+                    <tr
+                      key={h.hco_key}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">
+                        <Link
+                          href={`/hcos/${encodeURIComponent(h.hco_key)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {h.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {h.hco_type ?? "—"}
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {[h.city, h.state].filter(Boolean).join(", ") || "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatNumber(h.calls)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           ) : (
@@ -691,30 +729,41 @@ export default async function Dashboard({
                 </tr>
               </thead>
               <tbody>
-                {topHcps.map((h, i) => (
-                  <tr
-                    key={h.hcp_key}
-                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                  >
-                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                      {i + 1}
-                    </td>
-                    <td className="px-5 py-2">
-                      <Link
-                        href={`/hcps/${encodeURIComponent(h.hcp_key)}`}
-                        className="text-[var(--color-primary)] hover:underline"
-                      >
-                        {h.name}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                      {h.specialty ?? "—"}
-                    </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(h.calls)}
+                {topHcps.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
+                    >
+                      No HCP calls in this period.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  topHcps.map((h, i) => (
+                    <tr
+                      key={h.hcp_key}
+                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                    >
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {i + 1}
+                      </td>
+                      <td className="px-5 py-2">
+                        <Link
+                          href={`/hcps/${encodeURIComponent(h.hcp_key)}`}
+                          className="text-[var(--color-primary)] hover:underline"
+                        >
+                          {h.name}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                        {h.specialty ?? "—"}
+                      </td>
+                      <td className="px-5 py-2 text-right font-mono">
+                        {formatNumber(h.calls)}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           )}
@@ -872,299 +921,16 @@ export default async function Dashboard({
         </div>
       ) : null}
 
-      {risingAccounts.length > 0 || decliningAccounts.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[var(--color-border)]">
-              <h2 className="font-display text-lg">Top rising accounts</h2>
-              <p className="text-xs text-[var(--color-ink-muted)]">
-                Largest unit gains in {period} vs the prior equal-length
-                window. Customers in both periods only.
-              </p>
-            </div>
-            {risingAccounts.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
-                No rising accounts in this window.
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="text-xs text-[var(--color-ink-muted)]">
-                  <tr>
-                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
-                    <th className="text-left font-normal px-5 py-2">HCO</th>
-                    <th className="text-right font-normal px-5 py-2">Prior</th>
-                    <th className="text-right font-normal px-5 py-2">Period</th>
-                    <th className="text-right font-normal px-5 py-2">Δ Units</th>
-                    <th className="text-right font-normal px-5 py-2">Δ %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {risingAccounts.map((a, i) => (
-                    <tr
-                      key={a.hco_key}
-                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                    >
-                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                        {i + 1}
-                      </td>
-                      <td className="px-5 py-2">
-                        <Link
-                          href={`/hcos/${encodeURIComponent(a.hco_key)}`}
-                          className="text-[var(--color-primary)] hover:underline"
-                        >
-                          {a.name}
-                        </Link>
-                        {a.city || a.state ? (
-                          <div className="text-xs text-[var(--color-ink-muted)]">
-                            {[a.city, a.state].filter(Boolean).join(", ")}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                        {formatNumber(Math.round(a.units_prior))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono">
-                        {formatNumber(Math.round(a.units_period))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-positive)]">
-                        +{formatNumber(Math.round(a.units_delta))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-positive)]">
-                        {a.units_delta_pct != null
-                          ? `+${a.units_delta_pct.toFixed(0)}%`
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+      <AccountMotionPanel
+        active={motionTab}
+        period={period}
+        rising={risingAccounts}
+        declining={decliningAccounts}
+        watch={watchList}
+        newAccounts={newAccounts}
+        searchParams={sp}
+      />
 
-          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-            <div className="px-5 py-4 border-b border-[var(--color-border)]">
-              <h2 className="font-display text-lg">Top declining accounts</h2>
-              <p className="text-xs text-[var(--color-ink-muted)]">
-                Largest unit losses in {period} vs the prior equal-length
-                window. Stop-outs (zero this period) appear in the watch
-                list, not here.
-              </p>
-            </div>
-            {decliningAccounts.length === 0 ? (
-              <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
-                No declining accounts in this window.
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="text-xs text-[var(--color-ink-muted)]">
-                  <tr>
-                    <th className="text-left font-normal px-5 py-2 w-8">#</th>
-                    <th className="text-left font-normal px-5 py-2">HCO</th>
-                    <th className="text-right font-normal px-5 py-2">Prior</th>
-                    <th className="text-right font-normal px-5 py-2">Period</th>
-                    <th className="text-right font-normal px-5 py-2">Δ Units</th>
-                    <th className="text-right font-normal px-5 py-2">Δ %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {decliningAccounts.map((a, i) => (
-                    <tr
-                      key={a.hco_key}
-                      className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                    >
-                      <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                        {i + 1}
-                      </td>
-                      <td className="px-5 py-2">
-                        <Link
-                          href={`/hcos/${encodeURIComponent(a.hco_key)}`}
-                          className="text-[var(--color-primary)] hover:underline"
-                        >
-                          {a.name}
-                        </Link>
-                        {a.city || a.state ? (
-                          <div className="text-xs text-[var(--color-ink-muted)]">
-                            {[a.city, a.state].filter(Boolean).join(", ")}
-                          </div>
-                        ) : null}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                        {formatNumber(Math.round(a.units_prior))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono">
-                        {formatNumber(Math.round(a.units_period))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-negative)]">
-                        {formatNumber(Math.round(a.units_delta))}
-                      </td>
-                      <td className="px-5 py-2 text-right font-mono text-[var(--color-negative)]">
-                        {a.units_delta_pct != null
-                          ? `${a.units_delta_pct.toFixed(0)}%`
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {watchList.length > 0 ? (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Watch list</h2>
-            <p className="text-xs text-[var(--color-ink-muted)]">
-              Accounts that bought in the prior {period.toLowerCase()} but
-              have ZERO sales in the current window. Sorted by prior-period
-              units (biggest stop-outs first).
-            </p>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs text-[var(--color-ink-muted)]">
-              <tr>
-                <th className="text-left font-normal px-5 py-2 w-8">#</th>
-                <th className="text-left font-normal px-5 py-2">HCO</th>
-                <th className="text-left font-normal px-5 py-2">Location</th>
-                <th className="text-left font-normal px-5 py-2">Last sale</th>
-                <th className="text-left font-normal px-5 py-2">Current rep</th>
-                <th className="text-right font-normal px-5 py-2">Prior units</th>
-                <th className="text-right font-normal px-5 py-2">
-                  Prior dollars
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchList.map((w, i) => (
-                <tr
-                  key={w.hco_key}
-                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                >
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {i + 1}
-                  </td>
-                  <td className="px-5 py-2">
-                    <Link
-                      href={`/hcos/${encodeURIComponent(w.hco_key)}`}
-                      className="text-[var(--color-primary)] hover:underline"
-                    >
-                      {w.name}
-                    </Link>
-                    {w.hco_type ? (
-                      <div className="text-xs text-[var(--color-ink-muted)]">
-                        {w.hco_type}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {[w.city, w.state].filter(Boolean).join(", ") || "—"}
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {w.last_sale_date ?? "—"}
-                  </td>
-                  <td className="px-5 py-2">
-                    {w.current_rep_user_key ? (
-                      <Link
-                        href={`/reps/${encodeURIComponent(w.current_rep_user_key)}`}
-                        className="text-[var(--color-primary)] hover:underline"
-                      >
-                        {w.current_rep_name ?? "—"}
-                      </Link>
-                    ) : (
-                      <span className="text-[var(--color-ink-muted)] italic">
-                        No rep
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono">
-                    {formatNumber(Math.round(w.units_prior))}
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                    {formatCompactDollars(w.dollars_prior)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      {newAccounts.length > 0 ? (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">New accounts</h2>
-            <p className="text-xs text-[var(--color-ink-muted)]">
-              HCOs whose first-ever sale fell inside {period}. Sorted by
-              units in the window so material wins surface first.
-            </p>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs text-[var(--color-ink-muted)]">
-              <tr>
-                <th className="text-left font-normal px-5 py-2 w-8">#</th>
-                <th className="text-left font-normal px-5 py-2">HCO</th>
-                <th className="text-left font-normal px-5 py-2">Location</th>
-                <th className="text-left font-normal px-5 py-2">First sale</th>
-                <th className="text-left font-normal px-5 py-2">Current rep</th>
-                <th className="text-right font-normal px-5 py-2">Units</th>
-                <th className="text-right font-normal px-5 py-2">Net dollars</th>
-              </tr>
-            </thead>
-            <tbody>
-              {newAccounts.map((n, i) => (
-                <tr
-                  key={n.hco_key}
-                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                >
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {i + 1}
-                  </td>
-                  <td className="px-5 py-2">
-                    <Link
-                      href={`/hcos/${encodeURIComponent(n.hco_key)}`}
-                      className="text-[var(--color-primary)] hover:underline"
-                    >
-                      {n.name}
-                    </Link>
-                    {n.hco_type ? (
-                      <div className="text-xs text-[var(--color-ink-muted)]">
-                        {n.hco_type}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {[n.city, n.state].filter(Boolean).join(", ") || "—"}
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {n.first_sale_date}
-                  </td>
-                  <td className="px-5 py-2">
-                    {n.current_rep_user_key ? (
-                      <Link
-                        href={`/reps/${encodeURIComponent(n.current_rep_user_key)}`}
-                        className="text-[var(--color-primary)] hover:underline"
-                      >
-                        {n.current_rep_name ?? "—"}
-                      </Link>
-                    ) : (
-                      <span className="text-[var(--color-ink-muted)] italic">
-                        No rep
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono">
-                    {formatNumber(Math.round(n.units_period))}
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                    {formatCompactDollars(n.dollars_period)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
 
       {topUnmapped.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
@@ -1238,15 +1004,6 @@ export default async function Dashboard({
         </div>
       ) : null}
 
-      <div className="text-center text-xs text-[var(--color-ink-muted)] pt-4">
-        Need deeper analysis?{" "}
-        <Link
-          href="/reports"
-          className="text-[var(--color-primary)] hover:underline"
-        >
-          Open the full Power BI report →
-        </Link>
-      </div>
     </div>
   );
 }

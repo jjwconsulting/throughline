@@ -297,7 +297,7 @@ export default function MatrixTable({
   const totalLeafCount = sections.reduce((sum, s) => sum + s.leaves.length, 0);
   if (totalLeafCount === 0) {
     return (
-      <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)]">
+      <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)] italic">
         No rows with activity in this window.
       </div>
     );

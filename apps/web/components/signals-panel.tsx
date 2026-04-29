@@ -50,8 +50,8 @@ export default function SignalsPanel({
         ) : null}
       </div>
       {signals.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)]">
-          {emptyHint ?? "Nothing to surface right now. "}
+        <div className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic">
+          {emptyHint ?? "Nothing to surface right now."}
         </div>
       ) : (
         <ul className="divide-y divide-[var(--color-border)]">

@@ -16,8 +16,8 @@ import { loadTopScoringAffiliatedHcps } from "@/lib/hcp-target-scores";
 import { getCurrentScope, scopeToSql, combineScopes } from "@/lib/scope";
 import { db } from "@/lib/db";
 import { eq, schema } from "@throughline/db";
-import { veevaAccountUrl } from "@/lib/veeva-url";
 import AffiliatedHcpScoresCard from "@/components/affiliated-hcp-scores-card";
+import HcoSnapshotCard from "@/components/hco-snapshot-card";
 import {
   filterClauses,
   filtersToParams,
@@ -63,6 +63,34 @@ async function loadHco(
     { hcoKey },
   );
   return rows[0] ?? null;
+}
+
+// Last-call-ever rolled up via HCP affiliation (all-time, filter-
+// independent). Used by HcoSnapshotCard for engagement status —
+// reflects actual HCO state regardless of page filter range. fact_call
+// has no direct hco_key today, so we roll up via dim_hcp.primary_parent_hco_key
+// (per project_gold_fact_call_followups).
+async function loadLastCallEverForHco(
+  tenantId: string,
+  hcoKey: string,
+): Promise<string | null> {
+  try {
+    const rows = await queryFabric<{ last_call: string | null }>(
+      tenantId,
+      `SELECT CONVERT(varchar(10), MAX(f.call_date), 23) AS last_call
+       FROM gold.fact_call f
+       JOIN gold.dim_hcp h
+         ON h.hcp_key = f.hcp_key
+         AND h.tenant_id = f.tenant_id
+       WHERE f.tenant_id = @tenantId
+         AND h.primary_parent_hco_key = @hcoKey`,
+      { hcoKey },
+    );
+    return rows[0]?.last_call ?? null;
+  } catch (err) {
+    console.error("loadLastCallEverForHco failed:", err);
+    return null;
+  }
 }
 
 // Attribution chain for an HCO: which territories it's bridged to (with
@@ -232,6 +260,7 @@ export default async function HcoDetail({
     attributionChain,
     affiliatedScores,
     tenantVeevaRows,
+    lastCallEver,
   ] = await Promise.all([
     loadInteractionKpis(tenantId, filters, sqlScope),
     loadTrend(tenantId, filters, sqlScope),
@@ -250,11 +279,19 @@ export default async function HcoDetail({
       .from(schema.tenantVeeva)
       .where(eq(schema.tenantVeeva.tenantId, tenantId))
       .limit(1),
+    // All-time last call (filter-independent) for the HCO snapshot
+    // engagement status.
+    loadLastCallEverForHco(tenantId, hco_key),
   ]);
-  const veevaUrl = veevaAccountUrl(
-    tenantVeevaRows[0]?.vaultDomain ?? null,
-    hco.veeva_account_id,
-  );
+  const vaultDomain = tenantVeevaRows[0]?.vaultDomain ?? null;
+
+  // Pull primary rep + primary territory for the snapshot from the
+  // attribution chain (sorted is_primary DESC by the loader, so [0]).
+  const primaryAttribution =
+    attributionChain.find((a) => a.is_primary === 1) ?? null;
+  // Top affiliated HCP for snapshot — first row from
+  // loadTopScoringAffiliatedHcps (already sorted by score DESC).
+  const topAffiliatedHcp = affiliatedScores[0] ?? null;
 
   // Show the sales-related surfaces only when this HCO actually has sales
   // history. New tenants (or HCOs that have never been a ship-to) get the
@@ -353,31 +390,35 @@ export default async function HcoDetail({
               </div>
             ) : null}
           </div>
-          <div className="flex items-center gap-3">
-            {veevaUrl ? (
-              <a
-                href={veevaUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs rounded-md px-3 py-1.5 bg-[var(--color-primary)] text-white hover:opacity-90"
-              >
-                Open in Veeva
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="h-3 w-3"
-                  aria-hidden="true"
-                >
-                  <path d="M11 3a1 1 0 100 2h2.586l-6.293 6.293a1 1 0 101.414 1.414L15 6.414V9a1 1 0 102 0V4a1 1 0 00-1-1h-5z" />
-                  <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
-                </svg>
-              </a>
-            ) : null}
-            <FilterBar filters={filters} />
-          </div>
+          <FilterBar filters={filters} />
         </div>
       </div>
+
+      <HcoSnapshotCard
+        inputs={{
+          last_call_ever: lastCallEver,
+          net_units_period: salesKpis.net_units_period,
+          net_units_prior: salesKpis.net_units_prior,
+          last_sale_date: salesKpis.last_sale,
+          tier: hco.tier,
+          hco_type: hco.hco_type,
+          primary_rep_user_key: primaryAttribution?.current_rep_user_key ?? null,
+          primary_rep_name: primaryAttribution?.current_rep_name ?? null,
+          primary_territory_label:
+            primaryAttribution?.territory_description ??
+            primaryAttribution?.territory_name ??
+            null,
+          top_affiliated_hcp: topAffiliatedHcp
+            ? {
+                hcp_key: topAffiliatedHcp.hcp_key,
+                name: topAffiliatedHcp.name,
+                score: topAffiliatedHcp.score_value,
+              }
+            : null,
+          veeva_account_id: hco.veeva_account_id,
+          vault_domain: vaultDomain,
+        }}
+      />
 
       <div
         className={
@@ -640,7 +681,7 @@ export default async function HcoDetail({
               <tr>
                 <td
                   colSpan={5}
-                  className="px-5 py-6 text-center text-[var(--color-ink-muted)]"
+                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
                 >
                   No calls in this period.
                 </td>

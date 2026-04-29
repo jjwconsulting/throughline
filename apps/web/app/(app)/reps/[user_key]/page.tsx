@@ -27,6 +27,7 @@ import {
 } from "@/lib/goal-lookup";
 import SignalsPanel from "@/components/signals-panel";
 import RepRecommendationsCard from "@/components/rep-recommendations-card";
+import RepSnapshotCard from "@/components/rep-snapshot-card";
 import {
   loadRepRecommendations,
   loadRecommendationContexts,
@@ -69,6 +70,28 @@ async function loadRep(
     { userKey },
   );
   return rows[0] ?? null;
+}
+
+// All-time last call by THIS rep (filter-independent). Used by
+// RepSnapshotCard for engagement status — reflects rep activity
+// regardless of the page's range filter.
+async function loadLastCallEverByRep(
+  tenantId: string,
+  repUserKey: string,
+): Promise<string | null> {
+  try {
+    const rows = await queryFabric<{ last_call: string | null }>(
+      tenantId,
+      `SELECT CONVERT(varchar(10), MAX(call_date), 23) AS last_call
+       FROM gold.fact_call
+       WHERE tenant_id = @tenantId AND owner_user_key = @repUserKey`,
+      { repUserKey },
+    );
+    return rows[0]?.last_call ?? null;
+  } catch (err) {
+    console.error("loadLastCallEverByRep failed:", err);
+    return null;
+  }
 }
 
 function formatNumber(n: number): string {
@@ -222,6 +245,7 @@ export default async function RepDetail({
     repTopHcosBySales,
     repCoverageHcos,
     recommendations,
+    lastCallEverByRep,
   ] = await Promise.all([
       loadInteractionKpis(tenantId, filters, sqlScope),
       loadTrend(tenantId, filters, sqlScope),
@@ -248,7 +272,13 @@ export default async function RepDetail({
       // pipeline_run) with a 4h generation rate-limit. Same
       // narrator-over-input pattern as the dashboard synopsis.
       loadRepRecommendations({ tenantId, repUserKey: user_key }),
+      // All-time last call (filter-independent) for snapshot engagement.
+      loadLastCallEverByRep(tenantId, user_key),
     ]);
+
+  const primaryCoverageCount = repCoverageHcos.filter(
+    (c) => c.is_primary_for_rep === 1,
+  ).length;
 
   const hasSalesHistory =
     repSalesKpis.last_sale != null ||
@@ -345,6 +375,18 @@ export default async function RepDetail({
           <FilterBar filters={filters} />
         </div>
       </div>
+
+      <RepSnapshotCard
+        inputs={{
+          calls_period: kpis.calls_period,
+          calls_goal: proratedGoal,
+          net_units_period: repSalesKpis.net_units_period,
+          units_goal: effectiveUnitsGoal,
+          coverage_hco_count: repCoverageHcos.length,
+          primary_coverage_hco_count: primaryCoverageCount,
+          last_call_ever: lastCallEverByRep,
+        }}
+      />
 
       <div className="space-y-3">
         <AccountToggle value={filters.account} />
@@ -598,7 +640,7 @@ export default async function RepDetail({
               <tr>
                 <td
                   colSpan={4}
-                  className="px-5 py-6 text-center text-[var(--color-ink-muted)]"
+                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
                 >
                   No calls in this period.
                 </td>

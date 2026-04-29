@@ -87,7 +87,7 @@ export default async function AdminAttributesPage() {
           </div>
         </div>
         {mappings.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)]">
+          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)] italic">
             No attribute mappings configured yet. Add one above to declare
             a bronze column as a scoring attribute.
           </div>

@@ -67,7 +67,7 @@ export default async function TenantsPage() {
               <tr>
                 <td
                   colSpan={4}
-                  className="px-4 py-8 text-center text-[var(--color-ink-muted)]"
+                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
                 >
                   No tenants yet. Create one above.
                 </td>

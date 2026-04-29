@@ -32,10 +32,17 @@ export default async function ReportsIndex() {
 
       {reports.length === 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center">
-          <p className="font-medium">No reports configured</p>
+          <p className="font-medium">No reports available yet</p>
           <p className="text-sm text-[var(--color-ink-muted)] mt-2 max-w-md mx-auto">
-            Set <span className="font-mono">POWERBI_REPORT_ID</span> in
-            .env.local and reload.
+            Power BI reports haven&apos;t been configured for your tenant. Reach
+            out to your admin to add one, or use{" "}
+            <Link
+              href="/dashboard"
+              className="text-[var(--color-primary)] hover:underline"
+            >
+              /dashboard
+            </Link>{" "}
+            for native analytics.
           </p>
         </div>
       ) : (

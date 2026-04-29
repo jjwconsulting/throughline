@@ -129,11 +129,11 @@ export default async function PipelinesPage() {
           </p>
         </div>
         {runs.length === 0 ? (
-          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)]">
+          <div className="px-5 py-12 text-center text-sm text-[var(--color-ink-muted)] italic">
             No pipeline runs recorded yet. Schedule pipelines in the Fabric
             workspace OR trigger from <Link
               href="/admin/mappings"
-              className="text-[var(--color-primary)] hover:underline"
+              className="text-[var(--color-primary)] hover:underline not-italic"
             >/admin/mappings</Link>.
           </div>
         ) : (

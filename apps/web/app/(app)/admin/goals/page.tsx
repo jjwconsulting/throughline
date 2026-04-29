@@ -245,7 +245,7 @@ function EmptyState({ message }: { message: string }) {
       <div>
         <h1 className="font-display text-3xl">Goals</h1>
       </div>
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center text-sm text-[var(--color-ink-muted)]">
+      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center text-sm text-[var(--color-ink-muted)] italic">
         {message}
       </div>
     </div>

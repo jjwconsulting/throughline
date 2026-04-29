@@ -30,6 +30,7 @@ import {
   loadHcpTargetScoresByKeys,
   loadTopScoringUncalledHcpsForRep,
 } from "@/lib/hcp-target-scores";
+import { parseLlmJson, LLM_CORE_RULES } from "@/lib/llm-utils";
 import { DEFAULT_FILTERS } from "@/app/(app)/dashboard/filters";
 
 const MODEL = "claude-sonnet-4-6";
@@ -556,8 +557,9 @@ type RecommendationInputs = {
 const SYSTEM_PROMPT = `You are a commercial analytics assistant for a pharma sales rep. \
 Your job is to suggest 3-5 specific HCPs or HCOs the rep should contact this week, ranked by importance.
 
-Hard rules:
-- Pick ONLY entities present in the input. NEVER invent a name or key.
+${LLM_CORE_RULES}
+
+Surface-specific rules:
 - Each recommendation must include the entity's exact "hcp_key" or "hco_key" from the input as the "key" field.
 - The "label" field is the entity's exact "name" from the input.
 - Each "reason" is ONE concise sentence that cites specific numbers from the input \
@@ -572,7 +574,6 @@ But TIER overrides category — a Tier 1 underactive coverage HCO beats a Tier 3
 - For "underactive_coverage" items: when "never_called" is true, the reason should highlight that the rep has explicit coverage but zero engagement. When false, cite the last_call_date as the gap.
 - For "predictions.hcp_target_scores" items: these are HCPs in the rep's coverage with HIGH composite target scores (0-100) from third-party data (Komodo procedure volumes, Clarivate counts, etc.) but ZERO recent calls. The score_value + top_contributors give you the "why this matters" context. Cite a specific contributor when reasoning ("Top-decile cisplatin volume but no calls in 12 weeks"). Treat score_value >= 80 as high-priority regardless of tier.
 - Avoid recommending an HCP that's in the top_5_called_hcps list — they're already engaged.
-- If a future-input field (forecasts, call_intelligence) is non-empty, weight it appropriately. If it's empty, ignore it.
 - Severity "high" = urgent (lost customer, big drop), "medium" = important (slowdown, gap), \
 "low" = opportunity (rising, untouched).
 
@@ -592,65 +593,50 @@ Output ONLY a JSON object with this exact shape, no preamble, no markdown fences
 If the input is mostly noise (no meaningful candidates), return {"recommendations": []}.`;
 
 // ---------------------------------------------------------------------------
-// Output parsing — defensive. Extracts JSON from LLM output, tolerates
-// stray markdown fences or preamble text. Returns null on unrecoverable
-// parse failures (caller surfaces "bad_output").
+// Output parsing — defensive. Uses shared parseLlmJson helper from
+// lib/llm-utils to strip markdown fences + extract JSON substring;
+// the validator below handles surface-specific shape checking.
 // ---------------------------------------------------------------------------
 
 function parseItems(raw: string): RepRecommendationItem[] | null {
-  if (typeof raw !== "string") return null;
-  // LLMs sometimes wrap JSON in ```json fences despite instructions;
-  // strip any fenced block first.
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
-  const candidate = fenced ? fenced[1]! : raw;
-  // Find the JSON object substring (first { to last }) — handles
-  // any stray preamble.
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  const json = candidate.slice(start, end + 1);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  if (
-    !parsed ||
-    typeof parsed !== "object" ||
-    !("recommendations" in parsed) ||
-    !Array.isArray((parsed as { recommendations: unknown }).recommendations)
-  ) {
-    return null;
-  }
-  const items = (parsed as { recommendations: unknown[] }).recommendations;
-  const validated: RepRecommendationItem[] = [];
-  for (const it of items) {
-    if (!it || typeof it !== "object") continue;
-    const rec = it as Record<string, unknown>;
+  return parseLlmJson<RepRecommendationItem[]>(raw, (parsed) => {
     if (
-      (rec.kind !== "hcp" && rec.kind !== "hco") ||
-      typeof rec.key !== "string" ||
-      typeof rec.label !== "string" ||
-      typeof rec.reason !== "string"
-    )
-      continue;
-    const sev =
-      rec.severity === "high" ||
-      rec.severity === "medium" ||
-      rec.severity === "low"
-        ? rec.severity
-        : undefined;
-    validated.push({
-      kind: rec.kind,
-      key: rec.key,
-      label: rec.label,
-      reason: rec.reason,
-      severity: sev,
-    });
-    if (validated.length >= MAX_ITEMS) break;
-  }
-  return validated;
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("recommendations" in parsed) ||
+      !Array.isArray((parsed as { recommendations: unknown }).recommendations)
+    ) {
+      return null;
+    }
+    const items = (parsed as { recommendations: unknown[] }).recommendations;
+    const validated: RepRecommendationItem[] = [];
+    for (const it of items) {
+      if (!it || typeof it !== "object") continue;
+      const rec = it as Record<string, unknown>;
+      if (
+        (rec.kind !== "hcp" && rec.kind !== "hco") ||
+        typeof rec.key !== "string" ||
+        typeof rec.label !== "string" ||
+        typeof rec.reason !== "string"
+      )
+        continue;
+      const sev =
+        rec.severity === "high" ||
+        rec.severity === "medium" ||
+        rec.severity === "low"
+          ? rec.severity
+          : undefined;
+      validated.push({
+        kind: rec.kind,
+        key: rec.key,
+        label: rec.label,
+        reason: rec.reason,
+        severity: sev,
+      });
+      if (validated.length >= MAX_ITEMS) break;
+    }
+    return validated;
+  });
 }
 
 // Underactive coverage: HCOs in rep's territories with zero calls
