@@ -256,25 +256,19 @@ def build_group_select(
                 sql_str(attr["scope_tag"]),
             ])
         )
+    # LATERAL VIEW column-list syntax is `AS col1, col2, ...` (NO parens
+    # around the list). Parenthesized form parses as an expression and
+    # Spark rejects it.
     stack_call = (
         f"stack({len(present_attrs)},\n      "
         + ",\n      ".join(stack_args)
-        + ")\n    AS (attribute_name, attribute_value, attribute_type, source_label, scope_tag)"
+        + ")\n    AS attribute_name, attribute_value, attribute_type, source_label, scope_tag"
     )
 
+    # Use inline subqueries (not WITH) so each per-group SELECT can be
+    # wrapped in (...) as a UNION ALL branch. Spark rejects top-level
+    # CTEs inside parentheses, which would break the multi-group UNION.
     select = f"""
-WITH ranked AS (
-  SELECT *,
-    ROW_NUMBER() OVER (
-      PARTITION BY {dedup_key}
-      ORDER BY {dedup_order} DESC NULLS LAST, _ingested_at DESC
-    ) AS _rn
-  FROM {bronze_ref}
-  WHERE {filter_clause}
-),
-deduped AS (
-  SELECT * FROM ranked WHERE _rn = 1
-)
 SELECT
   '{tenant_id}' AS tenant_id,
   CAST(deduped.`{id_column}` AS STRING) AS hcp_id,
@@ -286,7 +280,18 @@ SELECT
   scope_tag,
   CAST(NULL AS DATE) AS valid_as_of,
   current_timestamp() AS silver_built_at
-FROM deduped
+FROM (
+  SELECT * FROM (
+    SELECT *,
+      ROW_NUMBER() OVER (
+        PARTITION BY {dedup_key}
+        ORDER BY {dedup_order} DESC NULLS LAST, _ingested_at DESC
+      ) AS _rn
+    FROM {bronze_ref}
+    WHERE {filter_clause}
+  ) ranked
+  WHERE _rn = 1
+) deduped
 LATERAL VIEW {stack_call}
 WHERE attribute_value IS NOT NULL
   AND TRIM(attribute_value) <> ''
