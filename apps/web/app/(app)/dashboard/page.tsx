@@ -29,6 +29,8 @@ import {
 import SignalsPanel from "@/components/signals-panel";
 import SynopsisCard from "@/components/synopsis-card";
 import AccountMotionPanel from "@/components/account-motion-panel";
+import Sparkline from "@/components/sparkline";
+import InlineBar from "@/components/inline-bar";
 import { loadDashboardSynopsis } from "@/lib/synopsis";
 import TrendChart from "./trend-chart";
 import FilterBar from "./filter-bar";
@@ -307,11 +309,23 @@ export default async function Dashboard({
     : salesDollarsLine && salesDelta
       ? `${salesDollarsLine} · ${salesDelta}`
       : salesDollarsLine ?? salesDelta;
-  const cards: { label: string; value: string; delta: string | null }[] = [
+  // KPI cards. `sparkline` is optional: only the metrics with an
+  // already-loaded trend series get one — Interactions reuses the
+  // `trend` data already on the page (calls per bucket); Net units
+  // reuses `salesTrend`. HCPs reached + Active reps don't have a
+  // per-bucket loader yet, so they ship without a sparkline rather
+  // than firing extra queries. Per design review viz addendum §1.
+  const cards: {
+    label: string;
+    value: string;
+    delta: string | null;
+    sparkline?: { value: number }[];
+  }[] = [
     {
       label: `${interactionLabel} (${period})`,
       value: formatNumber(kpis.calls_period),
       delta: interactionsSecondary,
+      sparkline: trend.map((t) => ({ value: t.calls })),
     },
     { label: `${reachLabel} (${period})`, value: reachValue, delta: null },
     { label: `Active reps (${period})`, value: formatNumber(kpis.reps), delta: null },
@@ -319,6 +333,7 @@ export default async function Dashboard({
       label: `Net units (${period})`,
       value: formatNumber(Math.round(salesKpis.net_units_period)),
       delta: salesSecondary,
+      sparkline: salesTrend.map((t) => ({ value: t.net_units })),
     },
   ];
 
@@ -371,6 +386,11 @@ export default async function Dashboard({
                 <p className="text-xs text-[var(--color-ink-muted)] mt-1">
                   {c.delta}
                 </p>
+              ) : null}
+              {c.sparkline && c.sparkline.length > 1 ? (
+                <div className="mt-3">
+                  <Sparkline data={c.sparkline} ariaLabel={`${c.label} trend`} />
+                </div>
               ) : null}
             </div>
           ))}
@@ -492,61 +512,52 @@ export default async function Dashboard({
               Veeva.
             </p>
           </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs text-[var(--color-ink-muted)]">
-              <tr>
-                <th className="text-left font-normal px-5 py-2">Tier</th>
-                <th className="text-right font-normal px-5 py-2">Total HCPs</th>
-                <th className="text-right font-normal px-5 py-2">Contacted</th>
-                <th className="text-right font-normal px-5 py-2">No activity</th>
-                <th className="text-right font-normal px-5 py-2">% Contacted</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tierCoverage.map((row) => {
-                const pct = Number(row.pct_contacted) || 0;
-                // Color the % cell green when ≥80% (healthy coverage),
-                // amber-ish when 50-79%, red when <50%. Tier 1 thresholds
-                // could be stricter later; keep universal for v1.
-                const pctColor =
-                  pct >= 80
-                    ? "text-[var(--color-positive-deep)]"
-                    : pct >= 50
-                      ? "text-[var(--color-ink-muted)]"
-                      : "text-[var(--color-negative-deep)]";
-                return (
-                  <tr
-                    key={row.tier}
-                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                  >
-                    <td className="px-5 py-2">
-                      {row.tier === "Unknown" ? (
-                        <span className="text-[var(--color-ink-muted)] italic">
-                          Unknown
-                        </span>
-                      ) : (
-                        `Tier ${row.tier}`
-                      )}
-                    </td>
-                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                      {formatNumber(Number(row.total_hcps) || 0)}
-                    </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(Number(row.contacted) || 0)}
-                    </td>
-                    <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
-                      {formatNumber(Number(row.no_activity) || 0)}
-                    </td>
-                    <td
-                      className={`px-5 py-2 text-right font-mono ${pctColor}`}
-                    >
-                      {pct}%
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {/* One row per tier — tier label, stacked horizontal bar
+              showing contacted vs no-activity proportion, then count
+              + percent on the right. Replaces the previous count
+              table per design review viz addendum: the actual
+              question ("am I weak on Tier 2?") is a proportion
+              question, not a count question. The InlineBar's track
+              (gray) is the no-activity portion; its fill (green) is
+              the contacted portion — same primitive, semantic shift. */}
+          <ul className="divide-y divide-[var(--color-border)]">
+            {tierCoverage.map((row) => {
+              const pct = Number(row.pct_contacted) || 0;
+              const total = Number(row.total_hcps) || 0;
+              const contacted = Number(row.contacted) || 0;
+              const pctColor =
+                pct >= 80
+                  ? "text-[var(--color-positive-deep)]"
+                  : pct >= 50
+                    ? "text-[var(--color-ink-muted)]"
+                    : "text-[var(--color-negative-deep)]";
+              return (
+                <li
+                  key={row.tier}
+                  className="flex items-center gap-4 px-5 py-3"
+                >
+                  <span className="w-20 text-sm flex-shrink-0">
+                    {row.tier === "Unknown" ? (
+                      <span className="text-[var(--color-ink-muted)] italic">
+                        Unknown
+                      </span>
+                    ) : (
+                      `Tier ${row.tier}`
+                    )}
+                  </span>
+                  <span className="flex-1">
+                    <InlineBar pct={pct} />
+                  </span>
+                  <span className="font-mono text-sm text-right whitespace-nowrap">
+                    <span className={pctColor}>{pct}%</span>
+                    <span className="text-[var(--color-ink-muted)] ml-2">
+                      {formatNumber(contacted)} / {formatNumber(total)}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       ) : null}
 
@@ -689,8 +700,13 @@ export default async function Dashboard({
                         {r.name}
                       </Link>
                     </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(r.calls)}
+                    <td className="px-5 py-2">
+                      <div className="flex items-center justify-end gap-2 font-mono">
+                        <span className="w-16">
+                          <InlineBar pct={(r.calls / (topReps[0]?.calls || 1)) * 100} />
+                        </span>
+                        <span>{formatNumber(r.calls)}</span>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -752,8 +768,13 @@ export default async function Dashboard({
                       <td className="px-5 py-2 text-[var(--color-ink-muted)]">
                         {[h.city, h.state].filter(Boolean).join(", ") || "—"}
                       </td>
-                      <td className="px-5 py-2 text-right font-mono">
-                        {formatNumber(h.calls)}
+                      <td className="px-5 py-2">
+                        <div className="flex items-center justify-end gap-2 font-mono">
+                          <span className="w-16">
+                            <InlineBar pct={(h.calls / (topHcos[0]?.calls || 1)) * 100} />
+                          </span>
+                          <span>{formatNumber(h.calls)}</span>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -800,8 +821,13 @@ export default async function Dashboard({
                       <td className="px-5 py-2 text-[var(--color-ink-muted)]">
                         {h.specialty ?? "—"}
                       </td>
-                      <td className="px-5 py-2 text-right font-mono">
-                        {formatNumber(h.calls)}
+                      <td className="px-5 py-2">
+                        <div className="flex items-center justify-end gap-2 font-mono">
+                          <span className="w-16">
+                            <InlineBar pct={(h.calls / (topHcps[0]?.calls || 1)) * 100} />
+                          </span>
+                          <span>{formatNumber(h.calls)}</span>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -874,8 +900,17 @@ export default async function Dashboard({
                         ? "—"
                         : [h.city, h.state].filter(Boolean).join(", ") || "—"}
                     </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(Math.round(h.net_units))}
+                    <td className="px-5 py-2">
+                      <div className="flex items-center justify-end gap-2 font-mono">
+                        <span className="w-16">
+                          <InlineBar
+                            pct={
+                              (h.net_units / (topHcosBySales[0]?.net_units || 1)) * 100
+                            }
+                          />
+                        </span>
+                        <span>{formatNumber(Math.round(h.net_units))}</span>
+                      </div>
                     </td>
                     <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
                       {formatCompactDollars(h.net_gross_dollars)}
@@ -949,8 +984,17 @@ export default async function Dashboard({
                         ? formatNumber(r.account_count)
                         : "—"}
                     </td>
-                    <td className="px-5 py-2 text-right font-mono">
-                      {formatNumber(Math.round(r.net_units))}
+                    <td className="px-5 py-2">
+                      <div className="flex items-center justify-end gap-2 font-mono">
+                        <span className="w-16">
+                          <InlineBar
+                            pct={
+                              (r.net_units / (topRepsBySales[0]?.net_units || 1)) * 100
+                            }
+                          />
+                        </span>
+                        <span>{formatNumber(Math.round(r.net_units))}</span>
+                      </div>
                     </td>
                     <td className="px-5 py-2 text-right font-mono text-[var(--color-ink-muted)]">
                       {formatCompactDollars(r.net_gross_dollars)}

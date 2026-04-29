@@ -151,34 +151,43 @@ export default function AccountMotionPanel({
         </p>
       </div>
 
-      {/* Tab strip */}
-      <div className="flex gap-1 px-3 pt-3 border-b border-[var(--color-border)] overflow-x-auto">
+      {/* Tab strip — underline style with primary-green active indicator
+          per design review §"AccountMotionPanel tab styling." Underline
+          tabs read as "section navigation within a card" (correct
+          semantic for this panel). Counts inline in parens so users
+          see whether a tab is empty before clicking. */}
+      <div
+        role="tablist"
+        className="flex border-b border-[var(--color-border)] gap-6 px-5 overflow-x-auto"
+      >
         {TABS.map((tab) => {
           const isActive = tab.id === active;
           const count = counts[tab.id];
           return (
             <Link
               key={tab.id}
+              role="tab"
+              aria-selected={isActive}
               href={tabHref(tab.id)}
               scroll={false}
               className={
-                "px-3 py-2 text-sm rounded-t-md flex items-center gap-1.5 whitespace-nowrap transition-colors " +
+                "relative py-3 text-sm font-medium transition-colors whitespace-nowrap " +
                 (isActive
-                  ? "bg-[var(--color-surface-alt)] text-[var(--color-ink)] font-medium"
-                  : "text-[var(--color-ink-muted)] hover:text-[var(--color-ink)] hover:bg-[var(--color-surface-alt)]/50")
+                  ? "text-[var(--color-ink)]"
+                  : "text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]")
               }
             >
               {tab.label}
-              <span
-                className={
-                  "text-xs rounded px-1.5 " +
-                  (isActive
-                    ? "bg-[var(--color-surface)] text-[var(--color-ink)]"
-                    : "bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)]")
-                }
-              >
-                {count}
+              <span className="ml-1.5 text-xs text-[var(--color-ink-muted)]">
+                ({count})
               </span>
+              <span
+                aria-hidden="true"
+                className={
+                  "absolute bottom-[-1px] left-0 right-0 h-[2px] rounded-full " +
+                  (isActive ? "bg-[var(--color-primary)]" : "bg-transparent")
+                }
+              />
             </Link>
           );
         })}

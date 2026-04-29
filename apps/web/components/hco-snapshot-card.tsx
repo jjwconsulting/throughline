@@ -84,8 +84,13 @@ export default function HcoSnapshotCard({
 
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-      {veevaUrl ? (
-        <div className="flex items-center justify-end mb-3">
+      {/* Header parity with HcpSnapshotCard per design review §3.1
+          (item #17): "Snapshot" title left, optional action toolbar
+          right. Engagement stays as one of the 4 stats below since
+          HCO has a different KPI mix than HCP. */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="font-display text-lg">Snapshot</h2>
+        {veevaUrl ? (
           <a
             href={veevaUrl}
             target="_blank"
@@ -104,8 +109,8 @@ export default function HcoSnapshotCard({
               <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
             </svg>
           </a>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
         {/* Engagement — pill replaces previous coloured-text per design
             review §4. Detail line keeps the "X days ago" context. */}

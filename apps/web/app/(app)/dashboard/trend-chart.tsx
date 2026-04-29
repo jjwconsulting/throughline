@@ -75,12 +75,15 @@ export default function TrendChart({
     <ResponsiveContainer width="100%" height={260}>
       <AreaChart data={formatted} margin={{ top: 10, right: 16, left: -8, bottom: 0 }}>
         <defs>
+          {/* Default series fill = chart-1 (primary green) per design
+              review §5. Accent gold is no longer the chart default —
+              it's reserved for true secondary comparison series. */}
           <linearGradient id={`fill-${valueKey}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-accent)" stopOpacity={0.35} />
-            <stop offset="100%" stopColor="var(--color-accent)" stopOpacity={0} />
+            <stop offset="0%" stopColor="var(--color-chart-1)" stopOpacity={0.35} />
+            <stop offset="100%" stopColor="var(--color-chart-1)" stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke="var(--color-chart-grid)" strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="label"
           stroke="var(--color-ink-muted)"
@@ -109,7 +112,7 @@ export default function TrendChart({
         <Area
           type="monotone"
           dataKey={valueKey}
-          stroke="var(--color-accent)"
+          stroke="var(--color-chart-1)"
           strokeWidth={2}
           fill={`url(#fill-${valueKey})`}
         />

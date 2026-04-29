@@ -425,33 +425,44 @@ export default async function RepDetail({
         />
       ) : null}
 
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">
-            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
-          </h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartBuckets(filters)} most recent {filters.granularity}
-            {chartBuckets(filters) === 1 ? "" : "s"} for {rep.name}
-          </p>
+      {/* Trends pair — Calls + Net units side-by-side at lg+ so the
+          rep can correlate calls vs sales passively. Mirrors
+          /dashboard TRENDS pattern per design review punch list
+          item #13. Net units cell only renders when this rep has
+          sales history; otherwise Calls fills the row alone. */}
+      <div
+        className={
+          hasSalesHistory
+            ? "grid grid-cols-1 lg:grid-cols-2 gap-4"
+            : ""
+        }
+      >
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h2 className="font-display text-lg">
+              Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+            </h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              {chartBuckets(filters)} most recent {filters.granularity}
+              {chartBuckets(filters) === 1 ? "" : "s"} for {rep.name}
+            </p>
+          </div>
+          <div className="px-2 py-4">
+            <TrendChart
+              data={trend}
+              goalTotal={proratedGoal}
+              paceUnitLabel={
+                filters.granularity === "week"
+                  ? "wk"
+                  : filters.granularity === "month"
+                    ? "mo"
+                    : "qtr"
+              }
+            />
+          </div>
         </div>
-        <div className="px-2 py-4">
-          <TrendChart
-            data={trend}
-            goalTotal={proratedGoal}
-            paceUnitLabel={
-              filters.granularity === "week"
-                ? "wk"
-                : filters.granularity === "month"
-                  ? "mo"
-                  : "qtr"
-            }
-          />
-        </div>
-      </div>
 
-      {hasSalesHistory ? (
-        <>
+        {hasSalesHistory ? (
           <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
             <div className="px-5 py-4 border-b border-[var(--color-border)]">
               <h2 className="font-display text-lg">
@@ -483,7 +494,11 @@ export default async function RepDetail({
               />
             </div>
           </div>
+        ) : null}
+      </div>
 
+      {hasSalesHistory ? (
+        <>
           {repTopHcosBySales.length > 0 ? (
             <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
               <div className="px-5 py-4 border-b border-[var(--color-border)]">

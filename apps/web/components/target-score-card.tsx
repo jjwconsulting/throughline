@@ -15,6 +15,7 @@
 // when no attribute mappings configured).
 
 import type { HcpTargetScoreRow } from "@/lib/hcp-target-scores";
+import InlineBar from "@/components/inline-bar";
 
 const ALL_SCOPE = "__all__";
 
@@ -32,9 +33,11 @@ function humanizeAttributeName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// Hex literals mirror @theme tokens — inline-style var() resolution
+// can silently fail in some build outputs (see InlineBar comment).
 function scoreColor(score: number): string {
-  if (score >= 70) return "var(--color-positive-deep)";
-  return "var(--color-ink-muted)";
+  if (score >= 70) return "#2A6342"; // positive-deep
+  return "#5A564E"; // ink-muted
 }
 
 export default function TargetScoreCard({
@@ -83,15 +86,7 @@ export default function TargetScoreCard({
                     {Math.round(s.score_value)}
                   </span>
                 </div>
-                <div className="h-1.5 rounded-full bg-[var(--color-surface-alt)] overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all"
-                    style={{
-                      width: `${pct}%`,
-                      backgroundColor: scoreColor(s.score_value),
-                    }}
-                  />
-                </div>
+                <InlineBar pct={pct} fill={scoreColor(s.score_value)} />
                 {top ? (
                   <p className="text-xs text-[var(--color-ink-muted)] mt-0.5">
                     Top contributor:{" "}

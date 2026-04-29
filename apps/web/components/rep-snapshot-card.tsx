@@ -73,6 +73,12 @@ export default function RepSnapshotCard({
 
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
+      {/* Header parity with HcpSnapshotCard / HcoSnapshotCard per
+          design review §3.1 (item #17): "Snapshot" title. No action
+          toolbar — reps don't have a Veeva account analog. */}
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="font-display text-lg">Snapshot</h2>
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
         {/* Calls attainment */}
         <Stat

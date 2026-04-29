@@ -11,6 +11,7 @@ import type {
 } from "@/lib/rep-recommendations";
 import { veevaAccountUrl } from "@/lib/veeva-url";
 import CallBriefButton from "@/components/call-brief-button";
+import InlineBar from "@/components/inline-bar";
 
 // "Suggested this week" card on /reps/[user_key]. Per-row expand
 // reveals contextual prep info + action launchpad (Open in Veeva,
@@ -405,15 +406,14 @@ function SalesMiniTrend({ trend }: { trend: SalesQuarter[] }) {
             <span className="text-[var(--color-ink-muted)] w-12 flex-shrink-0">
               {q.bucket_label}
             </span>
-            <span className="flex-1 h-2 bg-[var(--color-surface-alt)] rounded relative overflow-hidden">
-              <span
-                className={
-                  "absolute inset-y-0 left-0 rounded " +
-                  (isNegative
-                    ? "bg-[var(--color-negative)]/60"
-                    : "bg-[var(--color-accent)]/60")
-                }
-                style={{ width: `${Math.max(widthPct, 2)}%` }}
+            <span className="flex-1">
+              {/* Hex literals mirror @theme tokens — inline-style
+                  var() resolution can silently fail (see InlineBar). */}
+              <InlineBar
+                pct={widthPct}
+                minPct={2}
+                fill={isNegative ? "#8A2F2F" : "#1F4E46"}
+                height="h-2"
               />
             </span>
             <span className="font-mono text-[var(--color-ink)] w-16 text-right flex-shrink-0">

@@ -32,6 +32,14 @@ import FilterBar from "../../dashboard/filter-bar";
 
 export const dynamic = "force-dynamic";
 
+// Caveat text shown to non-admin viewers via a "?" tooltip on the
+// Sales attribution card. Admins still see this as a permanent footer
+// underneath the table; for reps/managers it's discover-on-demand
+// per design review item #21 — they shouldn't have admin-context
+// caveats permanently consuming card real-estate.
+const ATTRIBUTION_CAVEAT =
+  "How primary is picked: when an account is assigned to multiple territories, Throughline picks one as primary using this priority — territories with an assigned Sales rep first, then team role (SAM > KAD > ALL), then manual-over-rule, then alphabetical by name. To change: edit the account-territory assignment in Veeva (or assign a Sales-typed user to the territory if no rep is shown). Changes flow into Throughline on the next pipeline refresh.";
+
 type HcoHeader = {
   hco_key: string;
   veeva_account_id: string;
@@ -240,6 +248,7 @@ export default async function HcoDetail({
   if (!resolution || !resolution.ok) notFound();
   const { scope: userScope } = resolution;
   const tenantId = userScope.tenantId;
+  const isAdmin = userScope.role === "admin" || userScope.role === "bypass";
 
   const hco = await loadHco(tenantId, hco_key);
   if (!hco) notFound();
@@ -542,14 +551,30 @@ export default async function HcoDetail({
       ) : null}
 
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">Sales attribution</h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            Which territory + rep this account&apos;s sales roll up to.
-            Set in Veeva via account-territory assignments. The{" "}
-            <span className="font-medium">Primary</span> row is the one
-            dashboard sales aggregates use.
-          </p>
+        <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-display text-lg">Sales attribution</h2>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              Which territory + rep this account&apos;s sales roll up to.
+              Set in Veeva via account-territory assignments. The{" "}
+              <span className="font-medium">Primary</span> row is the one
+              dashboard sales aggregates use.
+            </p>
+          </div>
+          {/* Per design review #21: non-admins get the admin-context
+              caveat (how primary is picked, how to change) behind a
+              "?" tooltip affordance instead of permanent footer
+              text. Admins still see the full footer below. */}
+          {!isAdmin ? (
+            <button
+              type="button"
+              aria-label={ATTRIBUTION_CAVEAT}
+              title={ATTRIBUTION_CAVEAT}
+              className="flex-shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full border border-[var(--color-border)] text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-alt)] text-xs leading-none"
+            >
+              ?
+            </button>
+          ) : null}
         </div>
         {attributionChain.length === 0 ? (
           <div className="px-5 py-6 text-sm text-[var(--color-ink-muted)]">
@@ -638,23 +663,25 @@ export default async function HcoDetail({
               ))}
             </tbody>
           </table>
-          <div className="px-5 py-3 text-xs text-[var(--color-ink-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface-alt)]/40 space-y-1">
-            <p>
-              <strong className="text-[var(--color-ink)]">How primary is picked:</strong>{" "}
-              when an account is assigned to multiple territories (Veeva
-              supports this), Throughline picks one as primary for sales
-              attribution using this priority — territories with an
-              assigned Sales rep first, then team role (SAM &gt; KAD &gt;
-              ALL), then manual-over-rule assignments, then alphabetical
-              by territory name.
-            </p>
-            <p>
-              <strong className="text-[var(--color-ink)]">To change:</strong>{" "}
-              edit the account-territory assignment in Veeva (or assign a
-              Sales-typed user to the territory if no rep is shown). Changes
-              flow into Throughline on the next pipeline refresh.
-            </p>
-          </div>
+          {isAdmin ? (
+            <div className="px-5 py-3 text-xs text-[var(--color-ink-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface-alt)]/40 space-y-1">
+              <p>
+                <strong className="text-[var(--color-ink)]">How primary is picked:</strong>{" "}
+                when an account is assigned to multiple territories (Veeva
+                supports this), Throughline picks one as primary for sales
+                attribution using this priority — territories with an
+                assigned Sales rep first, then team role (SAM &gt; KAD &gt;
+                ALL), then manual-over-rule assignments, then alphabetical
+                by territory name.
+              </p>
+              <p>
+                <strong className="text-[var(--color-ink)]">To change:</strong>{" "}
+                edit the account-territory assignment in Veeva (or assign a
+                Sales-typed user to the territory if no rep is shown). Changes
+                flow into Throughline on the next pipeline refresh.
+              </p>
+            </div>
+          ) : null}
         </>
         )}
       </div>

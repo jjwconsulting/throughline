@@ -14,6 +14,7 @@
 // pass null when the loader returns null and the card hides.
 
 import type { PeerCohortData } from "@/lib/hcp-page-insights";
+import InlineBar from "@/components/inline-bar";
 
 const MIN_COHORT_FOR_DISPLAY = 5;
 
@@ -121,11 +122,8 @@ export default function PeerCohortCard({
                   <span className="text-[var(--color-ink)] w-24 truncate flex-shrink-0">
                     {c.channel}
                   </span>
-                  <span className="flex-1 h-1.5 bg-[var(--color-surface-alt)] rounded relative overflow-hidden">
-                    <span
-                      className="absolute inset-y-0 left-0 rounded bg-[var(--color-accent)]/70"
-                      style={{ width: `${Math.max(c.pct, 2)}%` }}
-                    />
+                  <span className="flex-1">
+                    <InlineBar pct={c.pct} minPct={2} />
                   </span>
                   <span className="font-mono text-[var(--color-ink-muted)] w-8 text-right flex-shrink-0">
                     {c.pct}%

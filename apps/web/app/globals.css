@@ -20,6 +20,17 @@
   --color-accent-deep: #7A5A1F;
   --color-positive-deep: #2A6342;
   --color-negative-deep: #8A2F2F;
+  /* Chart-series tokens (design review §5). Default trend fill moves
+     from accent gold to primary green so the brand colour anchors the
+     chart instead of an accent fighting with the rest of the palette.
+     Accent gold becomes the comparison-only series. ink-muted is the
+     "other" series. chart-grid mirrors --color-border for axis +
+     gridlines but is named separately so chart styling is independent
+     of card chrome. */
+  --color-chart-1: #1F4E46;
+  --color-chart-2: #C89B4A;
+  --color-chart-3: #5A564E;
+  --color-chart-grid: #E5E3DB;
 
   --font-display: "DM Serif Display", Georgia, serif;
   --font-body: "DM Sans", system-ui, -apple-system, sans-serif;
