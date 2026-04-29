@@ -477,8 +477,9 @@ they call this week."
 
 **Density (high):**
 - 8+ cards on a page that's also dense. Two trend charts again.
-- Coverage HCOs table can have 100+ rows for some reps. No
-  pagination.
+- ✅ Coverage HCOs (RESOLVED 2026-04-29) — was a 200+ row wall;
+  now uses the long-list pattern (default-truncate top 20 + search +
+  show-all). See `coverage-hcos-table.tsx` and `ui-patterns.md`.
 - Top HCOs by Units + Coverage HCOs both list HCOs. Different cuts
   but visual repetition.
 
@@ -501,8 +502,8 @@ has to scroll past everything.
 - **A RepSnapshotCard** mirroring HCP/HCO would be valuable: rep
   pace (calls + units attainment), territories covered, last call
   date, headcount of HCPs in coverage, total open-targets count.
-- **Coverage HCOs is a long table** — could become a search/filter
-  table or move to its own sub-page.
+- ✅ Coverage HCOs long-table problem (RESOLVED 2026-04-29) — now
+  uses the long-list pattern with search + truncate.
 - **Two trend charts back-to-back** — same observation as dashboard.
 - **Verify recommendation card visual prominence** — the "Suggested
   this week" card should feel like the headline action area,
@@ -514,8 +515,10 @@ has to scroll past everything.
    "what should I do this week" beats "what did I do last week."
 2. **Add a RepSnapshotCard** — pace, attainment, territory count,
    coverage size, key flag (e.g. "behind pace").
-3. **Tabify Coverage HCOs** — currently always visible; could be
-   one of several tabs ("Coverage" / "Top called" / "Top sales").
+3. ✅ Coverage HCOs density (RESOLVED 2026-04-29) — addressed via
+   long-list pattern (search + truncate + show-all) rather than
+   tabification, which is a lighter intervention with the same
+   value.
 4. **Consolidate two trend charts** into a switchable single chart
    (Calls vs Net units toggle), saving vertical space.
 
@@ -921,8 +924,8 @@ hierarchy.
 **Not formally audited.** Tailwind grid classes (`grid-cols-1
 md:grid-cols-2 lg:grid-cols-4`) suggest mobile-friendly intent at
 the layout level, but:
-- Wide tables (Coverage HCOs, /admin/mappings, /explore matrix) will
-  overflow on mobile
+- Wide tables (`/admin/mappings`, `/explore` matrix) will overflow.
+  (Coverage HCOs is now compact via the long-list pattern.) on mobile
 - Header rows with FilterBar + h1 use `flex-wrap` — should degrade
   gracefully but not verified
 - Numeric columns + monospace fonts may look cramped at small sizes

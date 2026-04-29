@@ -238,6 +238,55 @@ For detail pages (e.g. `/hcps/[hcp_key]`):
 
 ---
 
+## Long lists (default-truncate + search + show-all)
+
+Pattern for any panel where the data set can grow beyond ~30 rows
+and reps would scroll past 90% of it looking for a specific entity.
+First implemented in `components/coverage-hcos-table.tsx` for the
+Coverage HCOs section on `/reps/[user_key]`.
+
+Three pieces:
+
+1. **Card header** — title, descriptive subtitle, search input on
+   the right with an inline "Clear" button when search is active.
+   ```tsx
+   <input
+     type="search"
+     placeholder="Search name, type, location…"
+     className="text-sm rounded-md border border-[var(--color-border)]
+                bg-[var(--color-surface)] text-[var(--color-ink)]
+                px-3 py-1.5 w-56 focus:outline-none focus:ring-2
+                focus:ring-[var(--color-primary)]"
+   />
+   ```
+2. **Result count line** — a thin bar between header and body that
+   adapts to context: "Showing 20 of 187 (sorted X first)" /
+   "47 matches for 'oncology'" / "No matches for 'foo'." Includes a
+   "Show all 187 →" toggle when truncated.
+   ```tsx
+   <div className="px-5 py-2 border-b border-[var(--color-border)]
+                   bg-[var(--color-surface-alt)]/30 text-xs
+                   text-[var(--color-ink-muted)] flex items-baseline
+                   justify-between gap-4">
+     ...
+   </div>
+   ```
+3. **Default truncation** — show top N (typically 20) sorted by the
+   most useful default. When user types in search, show ALL matches
+   (not just the first 20), so rows below the truncation surface.
+
+**When to use:** any list where the user is more likely to be
+hunting for a specific entity than scanning the full set. Coverage
+HCOs (200+), saved mappings (100+), affiliated HCPs at large
+hospitals (varies).
+
+**When NOT to use:** "Top X" tables that always show a fixed top-N
+ranking — those are intentionally short and ranking is the point.
+
+**Server-side vs client-side filtering:** client-side is fine when
+the full set fits comfortably in JSON (~50KB / ~500 rows). Beyond
+that, switch to server-side filter via debounced search + URL state.
+
 ## Tables
 
 ```tsx

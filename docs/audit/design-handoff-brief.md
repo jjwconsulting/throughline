@@ -35,6 +35,11 @@ So you know what NOT to redo:
 - **Snapshot card parity** → HcoSnapshotCard + RepSnapshotCard added
   matching the existing HcpSnapshotCard. All three detail pages now
   open with a consistent 4-stat snapshot grid.
+- **Coverage HCOs long-list** on /reps/[user_key] → was a wall of
+  200+ rows; now `coverage-hcos-table.tsx` with default-truncate
+  (top 20 sorted Primary first) + client-side search bar +
+  "Show all 187 →" toggle. Establishes a reusable long-list pattern
+  documented in `ui-patterns.md`.
 - **/settings hidden from nav** until it has real content.
 - **/reports empty state** rewritten to user-friendly copy (no longer
   leaks env var name).
@@ -164,8 +169,8 @@ various surface colors.
 
 Tailwind grid classes suggest mobile-friendly intent
 (`grid-cols-1 md:grid-cols-2 lg:grid-cols-4`), but:
-- Wide tables (Coverage HCOs, /admin/mappings, /explore matrix)
-  will overflow
+- Wide tables (`/admin/mappings`, `/explore` matrix) will overflow.
+  (Coverage HCOs is now compact via the long-list pattern.)
 - Header rows with FilterBar use `flex-wrap` — should degrade but
   not verified
 - Numeric columns + monospace fonts may look cramped at small sizes
