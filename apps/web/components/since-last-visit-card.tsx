@@ -159,9 +159,9 @@ function ParentSalesRow({ data }: { data: SinceLastVisitData }) {
         <span
           className={`font-mono text-sm flex-shrink-0 ${
             isUp
-              ? "text-[var(--color-positive)]"
+              ? "text-[var(--color-positive-deep)]"
               : isDown
-                ? "text-[var(--color-negative)]"
+                ? "text-[var(--color-negative-deep)]"
                 : "text-[var(--color-ink-muted)]"
           }`}
         >
@@ -177,7 +177,7 @@ function FirstSaleRow({ date }: { date: string }) {
   return (
     <div>
       <p className="text-sm">
-        <span className="text-[var(--color-positive)] font-medium">
+        <span className="text-[var(--color-positive-deep)] font-medium">
           First-ever sale at parent HCO
         </span>
         <span className="text-[var(--color-ink-muted)]">

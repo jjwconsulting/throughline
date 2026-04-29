@@ -361,7 +361,7 @@ export default async function HcoDetail({
         </Link>
         <div className="mt-2 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-3xl">{hco.name}</h1>
+            <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">{hco.name}</h1>
             <p className="text-[var(--color-ink-muted)] text-sm">
               {subtitleBits.join(" • ") || "—"}
               {hco.bed_count ? ` • ${hco.bed_count} beds` : ""}
@@ -583,7 +583,7 @@ export default async function HcoDetail({
                 >
                   <td className="px-5 py-2">
                     {a.is_primary === 1 ? (
-                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)]">
                         Primary
                       </span>
                     ) : (

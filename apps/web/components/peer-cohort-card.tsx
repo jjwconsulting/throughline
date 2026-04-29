@@ -67,9 +67,9 @@ export default function PeerCohortCard({
             <p
               className={`text-xs mt-1.5 ${
                 isUnder
-                  ? "text-[var(--color-negative)]"
+                  ? "text-[var(--color-negative-deep)]"
                   : isOver
-                    ? "text-[var(--color-positive)]"
+                    ? "text-[var(--color-positive-deep)]"
                     : "text-[var(--color-ink-muted)]"
               }`}
             >

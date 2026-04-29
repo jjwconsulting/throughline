@@ -33,11 +33,7 @@ function humanizeAttributeName(name: string): string {
 }
 
 function scoreColor(score: number): string {
-  // Three buckets — high (>= 70), mid (40-70), low (< 40). Tracks the
-  // LLM prompt's score >= 80 = high-priority threshold loosely; visual
-  // intent is "is this HCP worth a targeted touch?"
-  if (score >= 70) return "var(--color-positive)";
-  if (score >= 40) return "var(--color-accent)";
+  if (score >= 70) return "var(--color-positive-deep)";
   return "var(--color-ink-muted)";
 }
 

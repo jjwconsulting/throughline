@@ -122,7 +122,7 @@ function CallBriefError({
               ? `Brief generation failed: ${message}`
               : "Brief generation failed.";
   return (
-    <p className="text-xs text-[var(--color-negative)] italic px-3 py-2 rounded-md bg-[var(--color-negative)]/5 border border-[var(--color-negative)]/20">
+    <p className="text-xs text-[var(--color-negative-deep)] italic px-3 py-2 rounded-md bg-[var(--color-negative)]/5 border border-[var(--color-negative)]/20">
       {text}
     </p>
   );

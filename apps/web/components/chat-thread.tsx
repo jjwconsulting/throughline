@@ -89,7 +89,7 @@ export default function ChatThread() {
           </div>
         ) : null}
         {error ? (
-          <div className="text-xs text-[var(--color-negative)] px-2">
+          <div className="text-xs text-[var(--color-negative-deep)] px-2">
             Error: {error}
           </div>
         ) : null}
@@ -266,7 +266,7 @@ function ToolResultPill({
         className={
           "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 hover:opacity-80 " +
           (isError
-            ? "bg-[var(--color-negative)]/10 border-[var(--color-negative)]/30 text-[var(--color-negative)]"
+            ? "bg-[var(--color-negative)]/10 border-[var(--color-negative)]/30 text-[var(--color-negative-deep)]"
             : "bg-[var(--color-surface-alt)] border-[var(--color-border)] text-[var(--color-ink-muted)]")
         }
       >

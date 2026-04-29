@@ -55,7 +55,7 @@ export default async function ReportDetail({ params }: { params: RouteParams }) 
         >
           ← Reports
         </Link>
-        <h1 className="font-display text-3xl mt-2">{report.title}</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">{report.title}</h1>
         <p className="text-[var(--color-ink-muted)] text-sm">
           {report.description}
         </p>

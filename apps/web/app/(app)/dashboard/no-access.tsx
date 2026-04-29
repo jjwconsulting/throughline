@@ -18,7 +18,7 @@ export default function NoAccess({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Dashboard</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Dashboard</h1>
       </div>
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center">
         <p className="font-medium">No access</p>

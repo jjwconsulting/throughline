@@ -221,7 +221,7 @@ export default function CsvSection() {
         </div>
 
         {parseError ? (
-          <p className="text-xs text-[var(--color-negative)]">{parseError}</p>
+          <p className="text-xs text-[var(--color-negative-deep)]">{parseError}</p>
         ) : null}
 
         {headers ? (
@@ -241,7 +241,7 @@ export default function CsvSection() {
                     <span className="block text-[var(--color-ink-muted)]">
                       {f.label}
                       {f.required ? (
-                        <span className="text-[var(--color-negative)] ml-1">*</span>
+                        <span className="text-[var(--color-negative-deep)] ml-1">*</span>
                       ) : null}
                     </span>
                     <select
@@ -326,7 +326,7 @@ export default function CsvSection() {
         <div className="rounded border border-[var(--color-border)] overflow-hidden">
           <div className="px-4 py-2 bg-[var(--color-surface-alt)] text-xs text-[var(--color-ink-muted)] flex items-center justify-between">
             <span>
-              <span className="text-[var(--color-positive)]">
+              <span className="text-[var(--color-positive-deep)]">
                 {state.saved} saved
               </span>
               {state.skipped > 0 ? (
@@ -343,7 +343,7 @@ export default function CsvSection() {
               {errorCount > 0 ? (
                 <>
                   {" · "}
-                  <span className="text-[var(--color-negative)]">
+                  <span className="text-[var(--color-negative-deep)]">
                     {errorCount} error{errorCount === 1 ? "" : "s"}
                   </span>
                 </>
@@ -374,7 +374,7 @@ export default function CsvSection() {
                 className={
                   "px-4 py-1.5 " +
                   (r.status === "error"
-                    ? "text-[var(--color-negative)]"
+                    ? "text-[var(--color-negative-deep)]"
                     : "text-[var(--color-ink-muted)]")
                 }
               >

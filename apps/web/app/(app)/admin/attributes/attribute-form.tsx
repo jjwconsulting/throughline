@@ -229,7 +229,7 @@ export default function AttributeForm({
             ))}
           </select>
           {columnsError ? (
-            <span className="block text-xs text-[var(--color-negative)] mt-1">
+            <span className="block text-xs text-[var(--color-negative-deep)] mt-1">
               {columnsError}
             </span>
           ) : null}
@@ -293,9 +293,9 @@ export default function AttributeForm({
       <div className="flex items-center justify-between gap-4">
         <div className="text-xs">
           {error ? (
-            <span className="text-[var(--color-negative)]">{error}</span>
+            <span className="text-[var(--color-negative-deep)]">{error}</span>
           ) : success ? (
-            <span className="text-[var(--color-positive)]">{success}</span>
+            <span className="text-[var(--color-positive-deep)]">{success}</span>
           ) : null}
         </div>
         <button

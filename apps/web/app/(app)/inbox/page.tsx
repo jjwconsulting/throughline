@@ -21,7 +21,7 @@ export default async function Inbox() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Inbox</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Inbox</h1>
         <p className="text-[var(--color-ink-muted)]">
           Signals across your scope.{" "}
           {totalSignals > 0

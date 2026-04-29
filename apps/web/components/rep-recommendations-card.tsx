@@ -38,7 +38,7 @@ const SEVERITY_BADGE: Record<
 > = {
   high: {
     label: "High",
-    className: "bg-[var(--color-negative)]/15 text-[var(--color-negative)]",
+    className: "bg-[var(--color-negative)]/15 text-[var(--color-negative-deep)]",
   },
   medium: {
     label: "Medium",
@@ -47,7 +47,7 @@ const SEVERITY_BADGE: Record<
   },
   low: {
     label: "Low",
-    className: "bg-[var(--color-positive)]/15 text-[var(--color-positive)]",
+    className: "bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)]",
   },
 };
 
@@ -343,7 +343,7 @@ function AffiliatedHcpRow({ hcp }: { hcp: AffiliatedHcp }) {
         <span
           className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] flex-shrink-0 ${
             tierBadge.priority === 1
-              ? "bg-[var(--color-negative)]/15 text-[var(--color-negative)]"
+              ? "bg-[var(--color-negative)]/15 text-[var(--color-negative-deep)]"
               : tierBadge.priority === 2
                 ? "bg-[var(--color-surface-alt)] text-[var(--color-ink)] border border-[var(--color-border)]"
                 : "bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)]"

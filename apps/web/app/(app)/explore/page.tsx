@@ -124,7 +124,7 @@ export default async function ExplorePage({
         </Link>
         <div className="mt-2 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-3xl">Explore</h1>
+            <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Explore</h1>
             <p className="text-[var(--color-ink-muted)]">
               Pivot any dimension against any metric across time.
               FilterBar narrows the universe; pickers below choose the

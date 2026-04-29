@@ -75,7 +75,7 @@ export default async function AdminUsersPage() {
             Goals →
           </Link>
         </div>
-        <h1 className="font-display text-3xl mt-2">Users</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Users</h1>
         <p className="text-[var(--color-ink-muted)]">
           Invite users with their tenant + role pre-set. Clerk sends the
           email; the webhook provisions a tenant_user row when they accept.

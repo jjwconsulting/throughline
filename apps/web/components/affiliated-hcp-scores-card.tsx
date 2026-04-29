@@ -13,8 +13,7 @@ import Link from "next/link";
 import type { AffiliatedHcpScore } from "@/lib/hcp-target-scores";
 
 function scoreColor(score: number): string {
-  if (score >= 70) return "var(--color-positive)";
-  if (score >= 40) return "var(--color-accent)";
+  if (score >= 70) return "var(--color-positive-deep)";
   return "var(--color-ink-muted)";
 }
 
@@ -111,7 +110,7 @@ export default function AffiliatedHcpScoresCard({
                 <span
                   className={
                     h.last_call_date === null
-                      ? "text-[var(--color-negative)]"
+                      ? "text-[var(--color-negative-deep)]"
                       : "text-[var(--color-ink-muted)]"
                   }
                 >

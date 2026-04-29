@@ -206,7 +206,7 @@ export default async function AdminGoalsPage({
         >
           ← Users
         </Link>
-        <h1 className="font-display text-3xl mt-2">Goals</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Goals</h1>
         <p className="text-[var(--color-ink-muted)]">
           Recommendations are pre-filled from historical actuals + peer benchmarks.
           Adjust the handful you have conviction about, then save.
@@ -243,7 +243,7 @@ function EmptyState({ message }: { message: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Goals</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Goals</h1>
       </div>
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-12 text-center text-sm text-[var(--color-ink-muted)] italic">
         {message}

@@ -59,9 +59,9 @@ export default function PipelineTrigger({
               <span
                 className={
                   lastRun.status === "failed"
-                    ? "text-[var(--color-negative)]"
+                    ? "text-[var(--color-negative-deep)]"
                     : lastRun.status === "succeeded"
-                      ? "text-[var(--color-positive)]"
+                      ? "text-[var(--color-positive-deep)]"
                       : "text-[var(--color-ink)]"
                 }
               >
@@ -90,12 +90,12 @@ export default function PipelineTrigger({
       </div>
 
       {state.error ? (
-        <p className="text-xs text-[var(--color-negative)] mt-3">
+        <p className="text-xs text-[var(--color-negative-deep)] mt-3">
           {state.error}
         </p>
       ) : null}
       {state.success ? (
-        <p className="text-xs text-[var(--color-positive)] mt-3">
+        <p className="text-xs text-[var(--color-positive-deep)] mt-3">
           ✓ {state.success}
         </p>
       ) : null}

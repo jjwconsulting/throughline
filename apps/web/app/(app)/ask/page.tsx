@@ -20,7 +20,7 @@ export default async function AskPage() {
         >
           ← Dashboard
         </Link>
-        <h1 className="font-display text-3xl mt-2">Ask</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Ask</h1>
         <p className="text-[var(--color-ink-muted)]">
           Conversational analytics over your data. The assistant calls
           the same loaders the dashboards use; tool calls are visible

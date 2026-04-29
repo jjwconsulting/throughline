@@ -51,7 +51,7 @@ export default function NarrationButton({
         </p>
       ) : null}
       {error ? (
-        <p className="text-xs text-[var(--color-negative)] mt-1">{error}</p>
+        <p className="text-xs text-[var(--color-negative-deep)] mt-1">{error}</p>
       ) : null}
     </div>
   );

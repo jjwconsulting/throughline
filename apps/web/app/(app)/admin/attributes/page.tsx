@@ -65,7 +65,7 @@ export default async function AdminAttributesPage() {
         >
           ← Admin
         </Link>
-        <h1 className="font-display text-3xl mt-2">Attributes</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Attributes</h1>
         <p className="text-[var(--color-ink-muted)]">
           Per-tenant HCP/HCO scoring attribute mappings (Komodo deciles,
           Clarivate volumes, etc.). Phase 1: config plumbing — silver +

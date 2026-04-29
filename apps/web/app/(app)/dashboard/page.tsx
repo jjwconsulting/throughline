@@ -69,9 +69,9 @@ function deltaLabel(current: number, prior: number): string | null {
 // consistently. Null = no goal / no measurement → muted.
 function attainColor(pct: number | null): string {
   if (pct == null) return "text-[var(--color-ink-muted)]";
-  if (pct >= 90) return "text-[var(--color-positive)]";
-  if (pct >= 70) return "text-[var(--color-ink)]";
-  return "text-[var(--color-negative)]";
+  if (pct >= 90) return "text-[var(--color-positive-deep)]";
+  if (pct >= 70) return "text-[var(--color-ink-muted)]";
+  return "text-[var(--color-negative-deep)]";
 }
 
 function daysAgo(isoDate: string): number {
@@ -326,7 +326,7 @@ export default async function Dashboard({
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-3xl">Dashboard</h1>
+          <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Dashboard</h1>
           <p className="text-[var(--color-ink-muted)]">
             Live from gold tables. Filters apply to all panels below.{" "}
             <Link
@@ -340,15 +340,25 @@ export default async function Dashboard({
         <FilterBar filters={filters} territories={accessibleTerritories} />
       </div>
 
+      {/* TODAY — synopsis only, conditional. Hides entirely on no
+          synopsis (this period takes the top slot). Per design
+          review §1A. */}
       {synopsis.kind === "show" ? (
-        <SynopsisCard
-          body={synopsis.body}
-          generatedAt={synopsis.generatedAt}
-        />
+        <section className="space-y-4 pt-2">
+          <h2 className="h2-section">Today</h2>
+          <SynopsisCard
+            body={synopsis.body}
+            generatedAt={synopsis.generatedAt}
+          />
+        </section>
       ) : null}
 
-      <div className="space-y-3">
-        <AccountToggle value={filters.account} />
+      {/* THIS PERIOD — orientation row: account toggle + 4 KPI cards. */}
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="h2-section">This period</h2>
+          <AccountToggle value={filters.account} />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {cards.map((c) => (
             <div
@@ -365,84 +375,116 @@ export default async function Dashboard({
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">
-            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
-          </h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartBuckets(filters)} most recent {filters.granularity}
-            {chartBuckets(filters) === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="px-2 py-4">
-          <TrendChart
-            data={trend}
-            goalTotal={periodGoal}
-            paceUnitLabel={
-              filters.granularity === "week"
-                ? "wk"
-                : filters.granularity === "month"
-                  ? "mo"
-                  : "qtr"
-            }
-          />
-        </div>
-      </div>
-
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
-        <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="font-display text-lg">
-              Net units — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
-            </h2>
-            <p className="text-xs text-[var(--color-ink-muted)]">
-              Signed units (sales − returns), {chartBuckets(filters)}{" "}
-              most recent {filters.granularity}
-              {chartBuckets(filters) === 1 ? "" : "s"}
-            </p>
+      {/* TRENDS — Calls + Net units side-by-side at lg+ so the user
+          can correlate calls vs sales passively. Stacks at md and
+          below per design review §1A.b. */}
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <h2 className="h2-section">Trends</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+            <div className="px-5 py-4 border-b border-[var(--color-border)]">
+              <h3 className="font-display text-lg">
+                Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+              </h3>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                {chartBuckets(filters)} most recent {filters.granularity}
+                {chartBuckets(filters) === 1 ? "" : "s"}
+              </p>
+            </div>
+            <div className="px-2 py-4">
+              <TrendChart
+                data={trend}
+                goalTotal={periodGoal}
+                paceUnitLabel={
+                  filters.granularity === "week"
+                    ? "wk"
+                    : filters.granularity === "month"
+                      ? "mo"
+                      : "qtr"
+                }
+              />
+            </div>
           </div>
-          {salesKpis.accounts_unmapped > 0 ? (
-            <Link
-              href="/admin/mappings"
-              className="text-xs text-[var(--color-primary)] hover:underline"
-            >
-              {salesKpis.accounts_unmapped} unmapped distributor
-              {salesKpis.accounts_unmapped === 1 ? "" : "s"} →
-            </Link>
-          ) : null}
+
+          <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+            <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="font-display text-lg">
+                  Net units — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+                </h3>
+                <p className="text-xs text-[var(--color-ink-muted)]">
+                  Signed units (sales − returns), {chartBuckets(filters)}{" "}
+                  most recent {filters.granularity}
+                  {chartBuckets(filters) === 1 ? "" : "s"}
+                </p>
+              </div>
+              {salesKpis.accounts_unmapped > 0 ? (
+                <Link
+                  href="/admin/mappings"
+                  className="text-xs text-[var(--color-primary)] hover:underline"
+                >
+                  {salesKpis.accounts_unmapped} unmapped distributor
+                  {salesKpis.accounts_unmapped === 1 ? "" : "s"} →
+                </Link>
+              ) : null}
+            </div>
+            <div className="px-2 py-4">
+              <TrendChart
+                data={salesTrend}
+                valueKey="net_units"
+                valueLabel="Net units"
+                format="number"
+                goalTotal={unitsPeriodGoal}
+                paceUnitLabel={
+                  filters.granularity === "week"
+                    ? "wk"
+                    : filters.granularity === "month"
+                      ? "mo"
+                      : "qtr"
+                }
+              />
+            </div>
+          </div>
         </div>
-        <div className="px-2 py-4">
-          <TrendChart
-            data={salesTrend}
-            valueKey="net_units"
-            valueLabel="Net units"
-            format="number"
-            goalTotal={unitsPeriodGoal}
-            paceUnitLabel={
-              filters.granularity === "week"
-                ? "wk"
-                : filters.granularity === "month"
-                  ? "mo"
-                  : "qtr"
-            }
+      </section>
+
+      {/* THINGS TO ACT ON — SignalsPanel + AccountMotionPanel
+          side-by-side at lg+. Per design review §1A:
+          AccountMotionPanel moves UP from previous bottom-of-page
+          position to here; it's an action surface, not a footer. */}
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <h2 className="h2-section">Things to act on</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <SignalsPanel
+            title="HCPs to re-engage"
+            subtitle={`Engaged previously, no contact in the last ${60} days`}
+            signals={inactivitySignals}
+            emptyHint="No lapsed HCPs in your scope. Either coverage is current or the data window is too narrow."
+          />
+          <AccountMotionPanel
+            active={motionTab}
+            period={period}
+            rising={risingAccounts}
+            declining={decliningAccounts}
+            watch={watchList}
+            newAccounts={newAccounts}
+            searchParams={sp}
           />
         </div>
-      </div>
+      </section>
 
-      <SignalsPanel
-        title="HCPs to re-engage"
-        subtitle={`Engaged previously, no contact in the last ${60} days`}
-        signals={inactivitySignals}
-        emptyHint="No lapsed HCPs in your scope. Either coverage is current or the data window is too narrow."
-      />
+      {/* ROLLUPS — all "Top X" tables and tier/team rollups. Per
+          design review §1A: hierarchical roll-ups belong below the
+          actionable middle of the page. */}
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <h2 className="h2-section">Rollups</h2>
 
       {tierCoverage.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">HCP tier coverage</h2>
+            <h3 className="font-display text-lg">HCP tier coverage</h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               Share of in-scope HCPs in each tier with at least one
               interaction in {period}. Universe is HCPs assigned to any
@@ -468,10 +510,10 @@ export default async function Dashboard({
                 // could be stricter later; keep universal for v1.
                 const pctColor =
                   pct >= 80
-                    ? "text-[var(--color-positive)]"
+                    ? "text-[var(--color-positive-deep)]"
                     : pct >= 50
-                      ? "text-[var(--color-ink)]"
-                      : "text-[var(--color-negative)]";
+                      ? "text-[var(--color-ink-muted)]"
+                      : "text-[var(--color-negative-deep)]";
                 return (
                   <tr
                     key={row.tier}
@@ -511,9 +553,9 @@ export default async function Dashboard({
       {teamRollup.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">
+            <h3 className="font-display text-lg">
               {scope.role === "manager" ? "Your team" : "All reps"}
-            </h2>
+            </h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               {teamRollup.length} rep{teamRollup.length === 1 ? "" : "s"} in
               {scope.role === "manager" ? " your team" : " the tenant"} —
@@ -607,7 +649,7 @@ export default async function Dashboard({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Top reps</h2>
+            <h3 className="font-display text-lg">Top reps</h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               By calls in {period}
             </p>
@@ -659,9 +701,9 @@ export default async function Dashboard({
 
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">
+            <h3 className="font-display text-lg">
               {showHcos ? "Top HCOs" : "Top HCPs"}
-            </h2>
+            </h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               By calls in {period}
             </p>
@@ -773,7 +815,7 @@ export default async function Dashboard({
       {topHcosBySales.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Top HCOs by Units</h2>
+            <h3 className="font-display text-lg">Top HCOs by Units</h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               Net units in {period}. Unmapped distributor sales appear as
               their own line so totals always reconcile.
@@ -849,7 +891,7 @@ export default async function Dashboard({
       {topRepsBySales.length > 0 ? (
         <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)]">
-            <h2 className="font-display text-lg">Top reps by Units</h2>
+            <h3 className="font-display text-lg">Top reps by Units</h3>
             <p className="text-xs text-[var(--color-ink-muted)]">
               Net units in {period}, attributed via primary territory
               ownership. Unattributed sales (no rep assignment yet) appear
@@ -920,25 +962,21 @@ export default async function Dashboard({
           </table>
         </div>
       ) : null}
+      </section>
 
-      <AccountMotionPanel
-        active={motionTab}
-        period={period}
-        rising={risingAccounts}
-        declining={decliningAccounts}
-        watch={watchList}
-        newAccounts={newAccounts}
-        searchParams={sp}
-      />
-
-
+      {/* DATA HEALTH — admin / data-quality concerns. Demoted to
+          page bottom and visually muted (surface-alt background) per
+          design review §1A. Section hides entirely when topUnmapped
+          is empty (admins only — non-admins never see it). */}
       {topUnmapped.length > 0 ? (
-        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <h2 className="h2-section">Data health</h2>
+        <div className="rounded-lg bg-[var(--color-surface-alt)] border border-[var(--color-border)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-baseline justify-between gap-4 flex-wrap">
             <div>
-              <h2 className="font-display text-lg">
+              <h3 className="font-display text-lg">
                 Top distributors (unmapped)
-              </h2>
+              </h3>
               <p className="text-xs text-[var(--color-ink-muted)]">
                 Highest-$ distributor accounts in {period} with no Veeva
                 mapping yet. Mapping these makes their sales roll up into
@@ -1002,6 +1040,7 @@ export default async function Dashboard({
             </tbody>
           </table>
         </div>
+      </section>
       ) : null}
 
     </div>

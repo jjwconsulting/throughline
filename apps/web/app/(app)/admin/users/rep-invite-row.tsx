@@ -36,7 +36,7 @@ export default function RepInviteRow({
       </td>
       <td className="px-4 py-3">
         {isProvisioned ? (
-          <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+          <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)]">
             Provisioned ({rep.provisioned_email})
           </span>
         ) : (
@@ -75,12 +75,12 @@ export default function RepInviteRow({
           </form>
         )}
         {state.error ? (
-          <p className="text-xs text-[var(--color-negative)] mt-1">
+          <p className="text-xs text-[var(--color-negative-deep)] mt-1">
             {state.error}
           </p>
         ) : null}
         {state.success ? (
-          <p className="text-xs text-[var(--color-positive)] mt-1">
+          <p className="text-xs text-[var(--color-positive-deep)] mt-1">
             {state.success}
           </p>
         ) : null}

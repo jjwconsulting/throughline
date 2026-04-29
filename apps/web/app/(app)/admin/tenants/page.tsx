@@ -14,7 +14,7 @@ export default async function TenantsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Tenants</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Tenants</h1>
         <p className="text-[var(--color-ink-muted)]">
           Each tenant gets its own bronze schema in Fabric. Shared silver + gold
           filter by tenant_id.
@@ -84,7 +84,7 @@ export default async function TenantsPage() {
                     <span
                       className={
                         t.status === "active"
-                          ? "inline-block text-xs rounded px-2 py-0.5 bg-[color-mix(in_srgb,var(--color-accent)_15%,var(--color-surface))] text-[var(--color-accent)] border border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
+                          ? "inline-block text-xs rounded px-2 py-0.5 bg-[color-mix(in_srgb,var(--color-accent)_15%,var(--color-surface))] text-[var(--color-accent-deep)] border border-[color-mix(in_srgb,var(--color-accent)_40%,transparent)]"
                           : "inline-block text-xs rounded px-2 py-0.5 bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)] border border-[var(--color-border)]"
                       }
                     >

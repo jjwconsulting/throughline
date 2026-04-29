@@ -4,7 +4,7 @@ export default function Home() {
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
       <div className="max-w-2xl">
-        <p className="text-sm uppercase tracking-widest text-[var(--color-accent)] mb-4">
+        <p className="text-sm uppercase tracking-widest text-[var(--color-accent-deep)] mb-4">
           Throughline &middot; working name
         </p>
         <h1 className="font-display text-5xl md:text-6xl leading-tight mb-6">

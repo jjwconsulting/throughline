@@ -81,9 +81,9 @@ export default function GoalsForm({
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="text-sm text-[var(--color-ink-muted)]">
           {state.error ? (
-            <span className="text-[var(--color-negative)]">{state.error}</span>
+            <span className="text-[var(--color-negative-deep)]">{state.error}</span>
           ) : state.saved > 0 ? (
-            <span className="text-[var(--color-positive)]">
+            <span className="text-[var(--color-positive-deep)]">
               ✓ Saved {state.saved} goal{state.saved === 1 ? "" : "s"}
             </span>
           ) : (
@@ -174,7 +174,7 @@ export default function GoalsForm({
                         Saved (manual)
                       </span>
                     ) : hasExisting ? (
-                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+                      <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)]">
                         Saved (rec)
                       </span>
                     ) : (

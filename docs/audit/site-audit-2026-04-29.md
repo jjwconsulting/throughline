@@ -1047,9 +1047,13 @@ Status legend: ✅ shipped · ⏳ awaits design input · ⏸ deferred
    Resolved 2026-04-29: italic muted-text pattern (`px-5 py-8 text-center
    text-sm text-ink-muted italic`) applied across all 16 surfaces.
    Documented in `docs/audit/ui-patterns.md`.
-2. ⏳ **Establish a section-hierarchy for /dashboard** — group related
-   panels into super-sections with visual differentiation.
-   *Awaits design input on hierarchy treatment.*
+2. ✅ **Establish a section-hierarchy for /dashboard**.
+   Resolved 2026-04-29 (post-design-review) — six super-sections
+   (TODAY / THIS PERIOD / TRENDS / THINGS TO ACT ON / ROLLUPS /
+   DATA HEALTH) with new `h2-section` typography token. AccountMotion
+   moved up from page bottom to inside THINGS TO ACT ON. Trends
+   side-by-side at lg+. See `docs/audit/design-review.md` §1A and
+   `project_design_review_phase_1_shipped` memory for spec + status.
 3. ✅ **Consolidate Account Motion** (rising/declining/watch/new) into
    a single tabbed panel on /dashboard. Resolved 2026-04-29 via new
    `components/account-motion-panel.tsx` with URL-driven tabs. Cut
@@ -1065,9 +1069,14 @@ Status legend: ✅ shipped · ⏳ awaits design input · ⏸ deferred
    `lib/llm-utils.ts`: shared `parseLlmJson<T>()` defensive parser
    + `LLM_CORE_RULES` shared system-prompt preamble. Refactored into
    synopsis, rep-recommendations, call-brief.
-7. ⏳ **Audit /hcps card overlap** — Snapshot owns headline;
-   collapse KPI cards or merge into Snapshot.
-   *Awaits design input on hierarchy + per-card weight.*
+7. ✅ **/hcps card overlap audit + collapse**. Resolved 2026-04-29
+   (post-design-review) — HcpSnapshotCard now owns headline metrics
+   (Interactions / Reps / Last contact / Score); standalone 3-col
+   KPI strip removed; SinceLastVisitCard collapsed into snapshot's
+   recent-activity footer; TargetScore + PeerCohort moved behind
+   `<details>` expanders under DETAIL super-section. See
+   `docs/audit/design-review.md` §1B and
+   `project_design_review_phase_1_shipped` memory.
 8. ⏳ **Extract a `<Card>` component** with `<CardHeader>` /
    `<CardBody>` slots. *Awaits design input on slot/variant API.*
 9. ⏳ **Standardize action button variants** — define "primary,"
@@ -1110,9 +1119,11 @@ Status legend: ✅ shipped · ⏳ awaits design input · ⏸ deferred
 
 - All interactive elements use semantic HTML (`<button>`, `<a>`,
   `<select>`, `<form>`).
-- No formal WCAG audit done; should pass automated tooling but
-  may surface contrast issues with the warm-gold accent on certain
-  surface backgrounds.
+- ✅ Coloured-text contrast resolved 2026-04-29 — every
+  `text-[var(--color-positive|negative|accent)]` callsite swapped
+  to the `-deep` variant introduced in `globals.css` (per design
+  review §5; satisfies WCAG AA at body sizes). Raw tokens remain
+  for fills/borders only.
 - Form labels are present (`<label>` wrap pattern in FilterBar).
 - Tables don't use `<caption>` or scope attributes; could improve
   for screen readers.

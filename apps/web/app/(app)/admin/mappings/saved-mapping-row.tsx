@@ -95,7 +95,7 @@ export default function SavedMappingRow({ row }: { row: SavedMappingRowProps }) 
                 setEditing(false);
               }}
               disabled={savePending || deletePending}
-              className="text-xs rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-negative)]/10 hover:border-[var(--color-negative)] hover:text-[var(--color-negative)] disabled:opacity-50"
+              className="text-xs rounded border border-[var(--color-border)] px-2 py-0.5 hover:bg-[var(--color-negative)]/10 hover:border-[var(--color-negative)] hover:text-[var(--color-negative-deep)] disabled:opacity-50"
             >
               {confirmDelete ? "Cancel" : "Delete"}
             </button>
@@ -132,7 +132,7 @@ export default function SavedMappingRow({ row }: { row: SavedMappingRowProps }) 
                 Cancel
               </button>
               {deleteState.error ? (
-                <span className="text-[var(--color-negative)]">
+                <span className="text-[var(--color-negative-deep)]">
                   {deleteState.error}
                 </span>
               ) : null}
@@ -287,12 +287,12 @@ export default function SavedMappingRow({ row }: { row: SavedMappingRowProps }) 
               ) : null}
 
               {saveState.error ? (
-                <p className="text-xs text-[var(--color-negative)]">
+                <p className="text-xs text-[var(--color-negative-deep)]">
                   {saveState.error}
                 </p>
               ) : null}
               {saveState.success ? (
-                <p className="text-xs text-[var(--color-positive)]">
+                <p className="text-xs text-[var(--color-positive-deep)]">
                   ✓ {saveState.success} — refresh to see this row update.
                 </p>
               ) : null}

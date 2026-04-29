@@ -15,6 +15,9 @@
 
 import Link from "next/link";
 import { veevaAccountUrl } from "@/lib/veeva-url";
+import EngagementPill, {
+  engagementStateFromLastCall,
+} from "@/components/engagement-pill";
 
 export type HcoSnapshotInputs = {
   // Engagement
@@ -43,43 +46,12 @@ export type HcoSnapshotInputs = {
 };
 
 function scoreColor(score: number): string {
-  if (score >= 70) return "var(--color-positive)";
-  if (score >= 40) return "var(--color-accent)";
+  // Per design review §5: positive/negative text needs the *-deep
+  // variants for WCAG AA. Mid-tier no longer uses accent gold (was
+  // gold-overloaded).
+  if (score >= 70) return "var(--color-positive-deep)";
+  if (score >= 40) return "var(--color-ink-muted)";
   return "var(--color-ink-muted)";
-}
-
-type EngagementStatus = {
-  label: "Hot" | "Active" | "Lapsed" | "Cold";
-  color: string;
-  detail: string;
-};
-
-function engagementStatus(lastCallIso: string | null): EngagementStatus {
-  if (!lastCallIso) {
-    return {
-      label: "Cold",
-      color: "var(--color-ink-muted)",
-      detail: "No calls on record",
-    };
-  }
-  const last = new Date(lastCallIso + "T00:00:00Z");
-  const days = Math.max(
-    0,
-    Math.floor((Date.now() - last.getTime()) / (1000 * 60 * 60 * 24)),
-  );
-  const detail =
-    days === 0
-      ? "Touched today"
-      : days < 14
-        ? `Touched ${days}d ago`
-        : days < 60
-          ? `Touched ${Math.round(days / 7)}w ago`
-          : `Touched ${Math.round(days / 30)}mo ago`;
-  if (days <= 14) return { label: "Hot", color: "var(--color-positive)", detail };
-  if (days <= 60) return { label: "Active", color: "var(--color-accent)", detail };
-  if (days <= 120)
-    return { label: "Lapsed", color: "var(--color-negative)", detail };
-  return { label: "Cold", color: "var(--color-ink-muted)", detail };
 }
 
 function formatNumber(n: number): string {
@@ -91,7 +63,7 @@ export default function HcoSnapshotCard({
 }: {
   inputs: HcoSnapshotInputs;
 }) {
-  const status = engagementStatus(inputs.last_call_ever);
+  const engagement = engagementStateFromLastCall(inputs.last_call_ever);
   const veevaUrl = veevaAccountUrl(inputs.vault_domain, inputs.veeva_account_id);
 
   // Sales motion display
@@ -135,13 +107,13 @@ export default function HcoSnapshotCard({
         </div>
       ) : null}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-        {/* Engagement */}
+        {/* Engagement — pill replaces previous coloured-text per design
+            review §4. Detail line keeps the "X days ago" context. */}
         <Stat
           label="Engagement"
-          value={
-            <span style={{ color: status.color }}>{status.label}</span>
-          }
-          detail={status.detail}
+          variant="raw"
+          value={<EngagementPill state={engagement.state} />}
+          detail={engagement.detail}
         />
 
         {/* Sales motion */}
@@ -234,19 +206,28 @@ function Stat({
   label,
   value,
   detail,
+  variant = "metric",
 }: {
   label: string;
   value: React.ReactNode;
   detail: string;
+  // "metric" = serif display-3xl wrapper (default — for numbers and
+  // text headlines). "raw" = no wrapper (for components like
+  // EngagementPill that bring their own typography).
+  variant?: "metric" | "raw";
 }) {
   return (
     <div className="min-w-0">
       <p className="text-xs uppercase tracking-wide text-[var(--color-ink-muted)]">
         {label}
       </p>
-      <p className="font-display text-3xl mt-2 leading-tight truncate">
-        {value}
-      </p>
+      {variant === "raw" ? (
+        <div className="mt-2 leading-tight">{value}</div>
+      ) : (
+        <p className="font-display text-3xl mt-2 leading-tight truncate">
+          {value}
+        </p>
+      )}
       <p className="text-xs text-[var(--color-ink-muted)] mt-1 truncate" title={detail}>
         {detail}
       </p>

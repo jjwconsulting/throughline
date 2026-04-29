@@ -16,7 +16,7 @@ export default async function ReportsIndex() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Reports</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Reports</h1>
         <p className="text-[var(--color-ink-muted)]">
           Power BI canvases for self-service analysis. Native dashboards live
           on{" "}

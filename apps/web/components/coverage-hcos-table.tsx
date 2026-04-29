@@ -70,7 +70,7 @@ export default function CoverageHcosTable({
           <p className="text-xs text-[var(--color-ink-muted)]">
             All HCOs assigned to {repName}&apos;s territories in Veeva
             ({totalCount} total · {primaryCount} primary).{" "}
-            <span className="text-[var(--color-positive)] font-medium">Primary</span>{" "}
+            <span className="text-[var(--color-positive-deep)] font-medium">Primary</span>{" "}
             = sales credit goes to {repFirstName};{" "}
             <span className="text-[var(--color-ink-muted)] italic">Co-coverage</span>{" "}
             = on the territory but credit goes to another rep.
@@ -172,7 +172,7 @@ export default function CoverageHcosTable({
               >
                 <td className="px-5 py-2">
                   {c.is_primary_for_rep === 1 ? (
-                    <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive)]">
+                    <span className="text-xs rounded px-2 py-0.5 bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)]">
                       Primary
                     </span>
                   ) : (

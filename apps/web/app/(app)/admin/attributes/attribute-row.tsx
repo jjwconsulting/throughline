@@ -53,7 +53,7 @@ export default function AttributeRow({
         className={
           "text-xs rounded px-2 py-0.5 " +
           (active
-            ? "bg-[var(--color-positive)]/15 text-[var(--color-positive)] hover:bg-[var(--color-positive)]/25"
+            ? "bg-[var(--color-positive)]/15 text-[var(--color-positive-deep)] hover:bg-[var(--color-positive)]/25"
             : "bg-[var(--color-surface-alt)] text-[var(--color-ink-muted)] border border-[var(--color-border)] hover:text-[var(--color-ink)]") +
           " disabled:opacity-50"
         }
@@ -64,7 +64,7 @@ export default function AttributeRow({
         type="button"
         onClick={remove}
         disabled={pending}
-        className="text-xs text-[var(--color-negative)] hover:underline disabled:opacity-50"
+        className="text-xs text-[var(--color-negative-deep)] hover:underline disabled:opacity-50"
       >
         Delete
       </button>

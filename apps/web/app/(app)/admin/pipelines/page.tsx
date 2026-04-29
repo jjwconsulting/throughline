@@ -34,9 +34,9 @@ const STATUS_BADGE: Record<PipelineRunRow["status"], string> = {
   running:
     "bg-[var(--color-primary)]/10 text-[var(--color-primary)] border border-[var(--color-primary)]/30",
   succeeded:
-    "bg-[var(--color-positive)]/10 text-[var(--color-positive)] border border-[var(--color-positive)]/30",
+    "bg-[var(--color-positive)]/10 text-[var(--color-positive-deep)] border border-[var(--color-positive)]/30",
   failed:
-    "bg-[var(--color-negative)]/10 text-[var(--color-negative)] border border-[var(--color-negative)]/30",
+    "bg-[var(--color-negative)]/10 text-[var(--color-negative-deep)] border border-[var(--color-negative)]/30",
 };
 
 function relativeTime(d: Date | null): string {
@@ -106,7 +106,7 @@ export default async function PipelinesPage() {
             Goals
           </Link>
         </div>
-        <h1 className="font-display text-3xl mt-2">Pipelines</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Pipelines</h1>
         <p className="text-[var(--color-ink-muted)]">
           Health of the data pipelines that keep your dashboards fresh.
           Global pipelines are managed by Throughline ops; tenant-scoped
@@ -178,7 +178,7 @@ export default async function PipelinesPage() {
                   <td className="px-4 py-2 text-[var(--color-ink-muted)] text-xs max-w-md">
                     {r.error ? (
                       <details>
-                        <summary className="cursor-pointer text-[var(--color-negative)]">
+                        <summary className="cursor-pointer text-[var(--color-negative-deep)]">
                           {r.message ?? "Failed"}
                         </summary>
                         <pre className="mt-1 whitespace-pre-wrap text-[10px] bg-[var(--color-surface-alt)] p-2 rounded">

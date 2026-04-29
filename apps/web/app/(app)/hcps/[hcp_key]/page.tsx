@@ -17,7 +17,6 @@ import { db } from "@/lib/db";
 import { eq, schema } from "@throughline/db";
 import TargetScoreCard from "@/components/target-score-card";
 import HcpSnapshotCard from "@/components/hcp-snapshot-card";
-import SinceLastVisitCard from "@/components/since-last-visit-card";
 import PeerCohortCard from "@/components/peer-cohort-card";
 import {
   filterClauses,
@@ -139,22 +138,8 @@ function formatDate(dateStr: string | null): string {
   });
 }
 
-function daysSince(dateStr: string | null): string {
-  if (!dateStr) return "Never";
-  const date = new Date(dateStr);
-  const diff = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
-  if (diff < 0) return formatDate(dateStr);
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Yesterday";
-  return `${diff} days ago`;
-}
-
-function deltaLabel(current: number, prior: number): string | null {
-  if (prior === 0) return null;
-  const pct = ((current - prior) / prior) * 100;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(0)}% vs prior period`;
-}
+// daysSince + deltaLabel removed — only used by the now-deleted KPI
+// cards array. HcpSnapshotCard owns equivalent display logic now.
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 type RouteParams = Promise<{ hcp_key: string }>;
@@ -219,26 +204,9 @@ export default async function HcpDetail({
   const vaultDomain = tenantVeevaRows[0]?.vaultDomain ?? null;
 
   const period = periodLabel(filters.range);
-  const cards = [
-    {
-      label: `Interactions (${period})`,
-      value: formatNumber(kpis.calls_period),
-      delta:
-        filters.range === "all"
-          ? null
-          : deltaLabel(kpis.calls_period, kpis.calls_prior),
-    },
-    {
-      label: `Reps engaged (${period})`,
-      value: formatNumber(kpis.reps),
-      delta: null,
-    },
-    {
-      label: "Last contact",
-      value: daysSince(kpis.last_call),
-      delta: kpis.last_call ? formatDate(kpis.last_call) : null,
-    },
-  ];
+  // Removed: 3-col KPI cards array (Interactions / Reps engaged /
+  // Last contact). These metrics moved into HcpSnapshotCard's 4-stat
+  // grid per design review §1B (item #5 in the punch list).
 
   const flags = [
     hcp.is_prescriber ? "Prescriber" : null,
@@ -263,9 +231,22 @@ export default async function HcpDetail({
         </Link>
         <div className="mt-2 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-3xl">{hcp.name}</h1>
+            <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">
+              {hcp.name}
+            </h1>
             <p className="text-[var(--color-ink-muted)] text-sm">
               {subtitleBits.join(" • ") || "—"}
+              {hcp.primary_parent_hco_key && hcp.primary_parent_hco_name ? (
+                <>
+                  {" • "}
+                  <Link
+                    href={`/hcos/${encodeURIComponent(hcp.primary_parent_hco_key)}`}
+                    className="text-[var(--color-primary)] hover:underline"
+                  >
+                    {hcp.primary_parent_hco_name}
+                  </Link>
+                </>
+              ) : null}
               {hcp.npi ? (
                 <>
                   {" • "}
@@ -295,117 +276,153 @@ export default async function HcpDetail({
         </div>
       </div>
 
-      <HcpSnapshotCard
-        inputs={{
-          scores,
-          last_call_ever: lastCallEver,
-          tier: hcp.tier,
-          parent_hco_key: hcp.primary_parent_hco_key,
-          parent_hco_name: hcp.primary_parent_hco_name,
-          veeva_account_id: hcp.veeva_account_id,
-          vault_domain: vaultDomain,
-          hcp_key: hcp_key,
-          viewer_user_key: viewerUserKey,
-        }}
-      />
+      {/* OVERVIEW super-section — Snapshot + Calls trend. The
+          "what matters about this HCP at a glance" layer. */}
+      <section className="space-y-4 pt-2">
+        <h2 className="h2-section">Overview</h2>
 
-      <SinceLastVisitCard data={sinceLastVisit} />
+        <HcpSnapshotCard
+          inputs={{
+            scores,
+            last_call_ever: lastCallEver,
+            interactions_period: kpis.calls_period,
+            reps_engaged: kpis.reps,
+            since_last_visit: sinceLastVisit,
+            veeva_account_id: hcp.veeva_account_id,
+            vault_domain: vaultDomain,
+            hcp_key: hcp_key,
+            viewer_user_key: viewerUserKey,
+          }}
+        />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {cards.map((c) => (
-          <div
-            key={c.label}
-            className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5"
-          >
-            <p className="text-sm text-[var(--color-ink-muted)]">{c.label}</p>
-            <p className="font-display text-3xl mt-2">{c.value}</p>
-            {c.delta ? (
-              <p className="text-xs text-[var(--color-ink-muted)] mt-1">
-                {c.delta}
-              </p>
-            ) : null}
+        <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
+          <div className="px-5 py-4 border-b border-[var(--color-border)]">
+            <h3 className="font-display text-lg">
+              Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
+            </h3>
+            <p className="text-xs text-[var(--color-ink-muted)]">
+              {chartBuckets(filters)} most recent {filters.granularity}
+              {chartBuckets(filters) === 1 ? "" : "s"} for {hcp.name}
+            </p>
           </div>
-        ))}
-      </div>
-
-      <TargetScoreCard scores={scores} />
-
-      <PeerCohortCard data={peerCohort} />
-
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">
-            Calls — {GRANULARITY_LABELS[filters.granularity].toLowerCase()}
-          </h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            {chartBuckets(filters)} most recent {filters.granularity}
-            {chartBuckets(filters) === 1 ? "" : "s"} for {hcp.name}
-          </p>
+          <div className="px-2 py-4">
+            <TrendChart data={trend} />
+          </div>
         </div>
-        <div className="px-2 py-4">
-          <TrendChart data={trend} />
-        </div>
-      </div>
+      </section>
 
-      <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]">
-        <div className="px-5 py-4 border-b border-[var(--color-border)]">
-          <h2 className="font-display text-lg">Reps who&apos;ve called</h2>
-          <p className="text-xs text-[var(--color-ink-muted)]">
-            By calls in {period}
-          </p>
-        </div>
-        <table className="w-full text-sm">
-          <thead className="text-xs text-[var(--color-ink-muted)]">
-            <tr>
-              <th className="text-left font-normal px-5 py-2 w-8">#</th>
-              <th className="text-left font-normal px-5 py-2">Rep</th>
-              <th className="text-left font-normal px-5 py-2">Title</th>
-              <th className="text-left font-normal px-5 py-2">Last call</th>
-              <th className="text-right font-normal px-5 py-2">Calls</th>
-            </tr>
-          </thead>
-          <tbody>
-            {callingReps.length === 0 ? (
+      {/* DETAIL super-section — progressive-disclosure expanders for
+          users who want to drill in. Per design review §1B: only ~30%
+          of users care about Score breakdown / Peer cohort on any
+          given visit, so default-collapse them. "Reps who've called"
+          is default-open since it's the most-used detail. */}
+      <section className="space-y-4 pt-6 border-t border-[var(--color-border)]">
+        <h2 className="h2-section">Detail</h2>
+
+        <details className="group rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <summary className="px-5 py-4 cursor-pointer flex items-center justify-between gap-4 list-none hover:bg-[var(--color-surface-alt)]">
+            <h3 className="font-display text-lg">Score breakdown</h3>
+            <ChevronDown />
+          </summary>
+          <div className="px-0 pb-0">
+            <TargetScoreCard scores={scores} />
+          </div>
+        </details>
+
+        <details className="group rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+          <summary className="px-5 py-4 cursor-pointer flex items-center justify-between gap-4 list-none hover:bg-[var(--color-surface-alt)]">
+            <h3 className="font-display text-lg">Compared to similar HCPs</h3>
+            <ChevronDown />
+          </summary>
+          <div className="px-0 pb-0">
+            <PeerCohortCard data={peerCohort} />
+          </div>
+        </details>
+
+        <details
+          open
+          className="group rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden"
+        >
+          <summary className="px-5 py-4 cursor-pointer flex items-center justify-between gap-4 list-none hover:bg-[var(--color-surface-alt)] border-b border-[var(--color-border)]">
+            <div>
+              <h3 className="font-display text-lg">Reps who&apos;ve called</h3>
+              <p className="text-xs text-[var(--color-ink-muted)]">
+                By calls in {period}
+              </p>
+            </div>
+            <ChevronDown />
+          </summary>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-[var(--color-ink-muted)]">
               <tr>
-                <td
-                  colSpan={5}
-                  className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
-                >
-                  No calls in this period.
-                </td>
+                <th className="text-left font-normal px-5 py-2 w-8">#</th>
+                <th className="text-left font-normal px-5 py-2">Rep</th>
+                <th className="text-left font-normal px-5 py-2">Title</th>
+                <th className="text-left font-normal px-5 py-2">Last call</th>
+                <th className="text-right font-normal px-5 py-2">Calls</th>
               </tr>
-            ) : (
-              callingReps.map((r, i) => (
-                <tr
-                  key={r.user_key}
-                  className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
-                >
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {i + 1}
-                  </td>
-                  <td className="px-5 py-2">
-                    <Link
-                      href={`/reps/${encodeURIComponent(r.user_key)}`}
-                      className="text-[var(--color-primary)] hover:underline"
-                    >
-                      {r.name}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {r.title ?? "—"}
-                  </td>
-                  <td className="px-5 py-2 text-[var(--color-ink-muted)]">
-                    {formatDate(r.last_call)}
-                  </td>
-                  <td className="px-5 py-2 text-right font-mono">
-                    {formatNumber(r.calls)}
+            </thead>
+            <tbody>
+              {callingReps.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-5 py-8 text-center text-sm text-[var(--color-ink-muted)] italic"
+                  >
+                    No calls in this period.
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              ) : (
+                callingReps.map((r, i) => (
+                  <tr
+                    key={r.user_key}
+                    className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-alt)]"
+                  >
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {i + 1}
+                    </td>
+                    <td className="px-5 py-2">
+                      <Link
+                        href={`/reps/${encodeURIComponent(r.user_key)}`}
+                        className="text-[var(--color-primary)] hover:underline"
+                      >
+                        {r.name}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {r.title ?? "—"}
+                    </td>
+                    <td className="px-5 py-2 text-[var(--color-ink-muted)]">
+                      {formatDate(r.last_call)}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono">
+                      {formatNumber(r.calls)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </details>
+      </section>
     </div>
+  );
+}
+
+function ChevronDown() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="w-4 h-4 text-[var(--color-ink-muted)] transition-transform group-open:rotate-180"
+      aria-hidden="true"
+    >
+      <path
+        fillRule="evenodd"
+        d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 111.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
+        clipRule="evenodd"
+      />
+    </svg>
   );
 }

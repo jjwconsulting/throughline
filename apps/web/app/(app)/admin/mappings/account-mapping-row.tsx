@@ -291,7 +291,7 @@ export default function AccountMappingRow({
               ) : null}
 
               {saveState.error ? (
-                <p className="text-xs text-[var(--color-negative)]">
+                <p className="text-xs text-[var(--color-negative-deep)]">
                   {saveState.error}
                 </p>
               ) : null}
@@ -303,7 +303,7 @@ export default function AccountMappingRow({
         <tr className="border-t border-[var(--color-border)]">
           <td
             colSpan={6}
-            className="px-4 py-2 text-xs text-[var(--color-positive)]"
+            className="px-4 py-2 text-xs text-[var(--color-positive-deep)]"
           >
             ✓ {saveState.success} — run config_sync + silver_account_xref_build
             + gold_fact_sale_build to see this account resolve in the dashboard.

@@ -103,10 +103,10 @@ export default function InviteForm({ tenants }: { tenants: Tenant[] }) {
       </div>
 
       {state.error ? (
-        <p className="text-sm text-[var(--color-negative)]">{state.error}</p>
+        <p className="text-sm text-[var(--color-negative-deep)]">{state.error}</p>
       ) : null}
       {state.success ? (
-        <p className="text-sm text-[var(--color-positive)]">{state.success}</p>
+        <p className="text-sm text-[var(--color-positive-deep)]">{state.success}</p>
       ) : null}
 
       <button

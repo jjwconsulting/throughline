@@ -365,7 +365,7 @@ export default async function RepDetail({
         </Link>
         <div className="mt-2 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="font-display text-3xl">{rep.name}</h1>
+            <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">{rep.name}</h1>
             <p className="text-[var(--color-ink-muted)] text-sm">
               {[rep.title, rep.department, rep.user_type]
                 .filter(Boolean)

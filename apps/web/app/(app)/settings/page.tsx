@@ -4,7 +4,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-display text-3xl">Settings</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight">Settings</h1>
         <p className="text-[var(--color-ink-muted)]">
           Account, notifications, and tenant preferences.
         </p>

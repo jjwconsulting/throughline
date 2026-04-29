@@ -27,7 +27,7 @@ export default async function InsightBrief({
     }
     return (
       <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-        <p className="text-xs text-[var(--color-negative)]">
+        <p className="text-xs text-[var(--color-negative-deep)]">
           Couldn&apos;t generate brief: {result.error}
         </p>
       </div>
@@ -36,7 +36,7 @@ export default async function InsightBrief({
 
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent)]">
+      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent-deep)]">
         <Icon name="sparkles" size={14} />
         <p className="text-xs uppercase tracking-wider">Briefing</p>
       </div>
@@ -50,7 +50,7 @@ export default async function InsightBrief({
 export function InsightBriefLoading() {
   return (
     <div className="rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] p-5">
-      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent)]">
+      <div className="flex items-center gap-1.5 mb-2 text-[var(--color-accent-deep)]">
         <Icon name="sparkles" size={14} className="animate-pulse" />
         <p className="text-xs uppercase tracking-wider">Briefing</p>
       </div>

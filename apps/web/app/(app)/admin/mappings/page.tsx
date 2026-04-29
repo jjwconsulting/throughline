@@ -79,7 +79,7 @@ export default async function AdminMappingsPage() {
             Goals
           </Link>
         </div>
-        <h1 className="font-display text-3xl mt-2">Mappings</h1>
+        <h1 className="font-display text-[28px] leading-[1.2] tracking-tight mt-2">Mappings</h1>
         <p className="text-[var(--color-ink-muted)]">
           Map distributor account IDs to Veeva accounts so sales rows resolve
           to the right HCP/HCO and roll up by territory.

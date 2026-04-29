@@ -214,8 +214,8 @@ function RisingDecliningTable({
 }) {
   const deltaColor =
     direction === "rising"
-      ? "text-[var(--color-positive)]"
-      : "text-[var(--color-negative)]";
+      ? "text-[var(--color-positive-deep)]"
+      : "text-[var(--color-negative-deep)]";
   return (
     <table className="w-full text-sm">
       <thead className="text-xs text-[var(--color-ink-muted)]">
